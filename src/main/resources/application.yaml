@@ -1,0 +1,236 @@
+# Card Fraud Rule Engine Configuration
+# All configuration is managed via Doppler secrets
+
+quarkus:
+  application:
+    name: card-fraud-rule-engine
+
+  # HTTP Configuration
+  http:
+    port: 8081
+    host: 0.0.0.0
+    limits:
+      max-body-size: 1M
+    # HTTP/2 support for improved throughput
+    version: 2.0  # Enable HTTP/2
+    # Enable HTTP/2 with ALPN for TLS connections
+    # Note: HTTP/2 is available over plain HTTP for development
+    # For production, use TLS for true HTTP/2 with ALPN
+
+  # Redis Configuration (via environment - Doppler)
+  redis:
+    hosts: ${REDIS_URL:redis://localhost:6379}
+    # Connection pool tuning for 10K TPS
+    # Default: maxPoolSize=6, maxWaitingHandlers=50
+    max-pool-size: ${REDIS_MAX_POOL_SIZE:20}
+    max-waiting-handlers: ${REDIS_MAX_WAITING_HANDLERS:100}
+    # Connection timeout (milliseconds)
+    timeout: ${REDIS_TIMEOUT:5s}
+    # Protocol version (RESP3 is faster)
+    protocol: ${REDIS_PROTOCOL:RESP3}
+
+  # Kafka Configuration (via environment - Doppler)
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+  # JWT / Auth0 Configuration
+  # Set SECURITY_SKIP_JWT_VALIDATION=true for local development (only works when APP_ENV=local)
+  smallrye-jwt:
+    enabled: true
+
+  # Logging - Use INFO by default, DEBUG only for specific categories
+  log:
+    level: INFO
+    console:
+      format: "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c{3.}] (%t) %s%e%n"
+    category:
+      "com.fraud.engine":
+        level: INFO  # Changed from DEBUG to reduce overhead
+      "io.quarkus.redis":
+        level: WARN
+      "io.vertx":
+        level: WARN
+
+  # Health and OpenAPI
+  smallrye-health:
+    root-path: /health
+  swagger-ui:
+    always-include: false
+    path: /swagger-ui
+  openapi:
+    path: /openapi
+    info-title: Card Fraud Rule Engine API
+    info-version: 1.0.0
+    info-description: Stateless runtime decision engine for AUTH/MONITORING evaluation
+
+# S3 / MinIO Configuration (shared with rule-management)
+s3:
+  endpoint-url: ${S3_ENDPOINT_URL:http://localhost:9000}
+  aws:
+    region: ${S3_REGION:us-east-1}
+    credentials:
+      static-provider:
+        access-key-id: ${S3_ACCESS_KEY_ID}
+        secret-access-key: ${S3_SECRET_ACCESS_KEY}
+
+# Application-specific Configuration
+app:
+  security:
+    # Environment for security validation (local, test, prod)
+    # SECURITY_SKIP_JWT_VALIDATION is only allowed in 'local' environment
+    environment: ${APP_ENV:local}
+  ruleset:
+    bucket: ${S3_BUCKET_NAME:fraud-gov-artifacts}
+    path-prefix: rulesets/
+    yaml-fallback-enabled: false
+    environment: ${RULESET_ENVIRONMENT:local}
+    # Startup ruleset loading - pre-loads rulesets at application startup
+    startup:
+      load-enabled: ${RULESET_STARTUP_LOAD_ENABLED:false}
+      rulesets: ${RULESET_STARTUP_RULESETS:CARD_AUTH,CARD_MONITORING}
+      fail-fast: ${RULESET_STARTUP_FAIL_FAST:false}
+      environment: ${RULESET_STARTUP_ENVIRONMENT:local}
+    # Auto-reload configuration
+    auto-reload:
+      enabled: ${RULESET_AUTO_RELOAD_ENABLED:false}
+      interval-seconds: ${RULESET_AUTO_RELOAD_INTERVAL_SECONDS:60}
+  field-registry:
+    path-prefix: fields/
+    poll-interval-seconds: ${FIELD_REGISTRY_POLL_INTERVAL_SECONDS:30}
+    enable-hot-reload: ${FIELD_REGISTRY_HOT_RELOAD:true}
+  startup:
+    validation:
+      enabled: ${STARTUP_VALIDATION:true}
+  hot-reload:
+    poll-interval-seconds: ${HOT_RELOAD_POLL_INTERVAL_SECONDS:30}
+  velocity:
+    default-window-seconds: 3600
+    default-threshold: 10
+  decision:
+    fail-open: true
+    default-decision: APPROVE
+
+# Messaging - Decision Events
+mp:
+  jwt:
+    verify:
+      issuer: https://${AUTH0_DOMAIN}/
+      publickey:
+        location: https://${AUTH0_DOMAIN}/.well-known/jwks.json
+      audiences: ${AUTH0_AUDIENCE}
+  messaging:
+    outgoing:
+      decision-events:
+        connector: smallrye-kafka
+        topic: fraud.card.decisions.v1
+        bootstrap.servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        # Producer optimization for async decision events
+        batch.size: 16384                    # 16KB batches for better throughput
+        linger.ms: 5                        # 5ms wait to batch more messages
+        compression.type: lz4                 # LZ4 compression (fast, good ratio)
+        acks: 1                             # Fire-and-forget for decision events (reliable delivery not critical)
+
+# Profile-specific overrides
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    http:
+      port: 8081
+    smallrye-fault-tolerance:
+      enabled: false
+    devservices:
+      enabled: false  # Disable dev services, use our docker-compose infra
+    smallrye-jwt:
+      enabled: false  # Disable JWT verification in dev mode
+    swagger-ui:
+      always-include: true
+  smallrye:
+    faulttolerance:
+      enabled: false
+  mp:
+    fault:
+      tolerance:
+        enabled: false
+
+"%prod":
+  quarkus:
+    log:
+      level: WARN
+      console:
+        enable: true  # Enable console logging for stdout-based collectors (Docker/K8s/Fluentd)
+        format: "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c{3.}] (%t) %s%e%n"
+      console-json:
+        enable: false  # Set to true for JSON format (when log collector supports it)
+    http:
+      port: 8081
+    smallrye-jwt:
+      enabled: true
+  app:
+    ruleset:
+      startup:
+        load-enabled: true  # Enable startup loading in production
+        fail-fast: true
+
+"%test":
+  quarkus:
+    redis:
+      hosts: redis://localhost:6379
+    kafka:
+      bootstrap-servers: localhost:9092
+    smallrye-fault-tolerance:
+      enabled: false
+    smallrye-jwt:
+      enabled: false  # Disable JWT verification in test mode
+  smallrye:
+    faulttolerance:
+      enabled: false
+  mp:
+    fault:
+      tolerance:
+        enabled: false
+    # Messaging config for test mode
+    messaging:
+      outgoing:
+        decision-events:
+          connector: smallrye-kafka
+          topic: fraud.card.decisions.v1
+          bootstrap.servers: localhost:9092
+          key.serializer: org.apache.kafka.common.serialization.StringSerializer
+          value.serializer: org.apache.kafka.common.serialization.StringSerializer
+          # Producer optimization
+          batch.size: 16384
+          linger.ms: 5
+          compression.type: lz4
+          acks: 1
+
+# Load Test Profile - Enables JWT for authenticated load testing
+"%load-test":
+  quarkus:
+    smallrye-jwt:
+      enabled: true  # Enable JWT validation for load testing
+    log:
+      level: INFO
+    swagger-ui:
+      always-include: false
+    app:
+      ruleset:
+        startup:
+          load-enabled: false  # Disable startup loading for load tests
+          fail-fast: false
+  mp:
+    messaging:
+      outgoing:
+        decision-events:
+          connector: smallrye-kafka
+          topic: fraud.card.decisions.v1
+          bootstrap.servers: localhost:9092
+          key.serializer: org.apache.kafka.common.serialization.StringSerializer
+          value.serializer: org.apache.kafka.common.serialization.StringSerializer
+          # Producer optimization
+          batch.size: 16384
+          linger.ms: 5
+          compression.type: lz4
+          acks: 1

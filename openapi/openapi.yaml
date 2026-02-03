@@ -1,0 +1,887 @@
+openapi: 3.0.3
+info:
+  title: Card Fraud Rule Engine API
+  version: "1.0.0"
+  description: |
+    Stateless runtime decision engine for AUTH/MONITORING card fraud evaluation.
+
+    ## Features
+    - **AUTH evaluation**: First-match semantics with fail-open default
+    - **MONITORING evaluation**: All-match semantics for analytics tracking
+    - **Hot reload**: Atomic ruleset version swapping without downtime
+    - **Replay mode**: Test transactions without side effects
+    - **Simulation**: Ad-hoc ruleset testing with inline YAML
+
+    ## Authentication
+    All endpoints except `/health` require JWT Bearer token with appropriate scopes.
+
+    Get a token from Auth0:
+    ```bash
+    curl -X POST https://${AUTH0_DOMAIN}/oauth/token \
+      -H "content-type: application/json" \
+      -d '{
+        "client_id":"${AUTH0_CLIENT_ID}",
+        "client_secret":"${AUTH0_CLIENT_SECRET}",
+        "audience":"https://fraud-rule-engine-api",
+        "grant_type":"client_credentials"
+      }'
+    ```
+
+servers:
+  - url: http://localhost:8081
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/evaluate/auth:
+    post:
+      summary: AUTH evaluation
+      description: |
+        Evaluates a transaction using AUTH ruleset.
+
+        **Semantics**: First-match - stops at first DECLINE rule, otherwise APPROVE.
+        **Fail-open**: Returns APPROVE if ruleset not loaded or on error.
+        **Side effects**: Publishes to Kafka, increments Redis velocity counters.
+      operationId: evaluateAUTH
+      tags: [Evaluation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionContext'
+            examples:
+              approve:
+                summary: Simple approval
+                value:
+                  transaction_id: "txn-001"
+                  card_hash: "abc123def456"
+                  amount: 50.00
+                  currency: "USD"
+                  merchant_category_code: "5411"
+                  country_code: "US"
+                  transaction_type: "PURCHASE"
+      responses:
+        "200":
+          description: Evaluation successful (always HTTP 200)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Decision'
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized - missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden - missing execute:rules scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/evaluate/monitoring:
+    post:
+      summary: MONITORING evaluation
+      description: |
+        Evaluates a transaction using MONITORING ruleset.
+
+        **Semantics**: All-match - evaluates all rules for analytics.
+        **Required**: `decision` field must be APPROVE or DECLINE.
+        **Side effects**: Publishes to Kafka only (no velocity increment).
+      operationId: evaluateMONITORING
+      tags: [Evaluation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionContext'
+            examples:
+              approve:
+                summary: MONITORING with APPROVE
+                value:
+                  transaction_id: "txn-002"
+                  card_hash: "abc123def456"
+                  amount: 50.00
+                  currency: "USD"
+                  merchant_category_code: "5411"
+                  country_code: "US"
+                  transaction_type: "PURCHASE"
+                  decision: "APPROVE"
+      responses:
+        "200":
+          description: Evaluation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Decision'
+        "400":
+          description: Invalid request (decision must be APPROVE or DECLINE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/evaluate/health:
+    get:
+      summary: Health check
+      description: |
+        Check if the evaluation service is healthy.
+        No authentication required.
+      operationId: health
+      tags: [Evaluation]
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /v1/evaluate/rulesets/registry/status:
+    get:
+      summary: Get registry status
+      description: Get information about loaded rulesets
+      operationId: getRegistryStatus
+      tags: [RulesetManagement]
+      responses:
+        "200":
+          description: Registry status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryStatus'
+
+  /v1/evaluate/rulesets/registry/{country}:
+    get:
+      summary: Get rulesets by country
+      description: Get all ruleset keys for a country
+      operationId: getCountryRulesets
+      tags: [RulesetManagement]
+      parameters:
+        - name: country
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Country code (e.g., US, CA, global)
+      responses:
+        "200":
+          description: List of ruleset keys
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountryRulesets'
+
+  /v1/evaluate/rulesets/hotswap:
+    post:
+      summary: Hot swap ruleset
+      description: |
+        Atomically replace a ruleset with a new version.
+
+        The hot swap is atomic - either all instances switch or none do.
+        If the version doesn't exist in storage, the swap fails.
+      operationId: hotSwapRuleset
+      tags: [RulesetManagement]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HotSwapRequest'
+      responses:
+        "200":
+          description: Hot swap completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HotSwapResponse'
+        "400":
+          description: Invalid request or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/evaluate/rulesets/load:
+    post:
+      summary: Load ruleset
+      description: Load and register a ruleset into the registry
+      operationId: loadRuleset
+      tags: [RulesetManagement]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadRulesetRequest'
+      responses:
+        "200":
+          description: Ruleset loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadRulesetResponse'
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ruleset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/evaluate/rulesets/bulk-load:
+    post:
+      summary: Bulk load rulesets
+      description: Load multiple rulesets into the registry
+      operationId: bulkLoadRulesets
+      tags: [RulesetManagement]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkLoadRequest'
+      responses:
+        "200":
+          description: Bulk load completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkLoadResponse'
+
+  /v1/manage/replay:
+    post:
+      summary: Replay transaction
+      description: |
+        Evaluate a transaction without side effects.
+
+        No Kafka publish, no Redis velocity increment.
+        Useful for testing rules against historical data.
+      operationId: replayTransaction
+      tags: [Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplayRequest'
+      responses:
+        "200":
+          description: Replay successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayResponse'
+        "404":
+          description: Ruleset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/manage/replay/batch:
+    post:
+      summary: Batch replay
+      description: Replay multiple transactions for testing
+      operationId: batchReplay
+      tags: [Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchReplayRequest'
+      responses:
+        "200":
+          description: Batch replay complete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchReplayResponse'
+
+  /v1/manage/simulate:
+    post:
+      summary: Simulate with custom ruleset
+      description: |
+        Test a transaction with an ad-hoc ruleset without deploying.
+
+        The ruleset is provided as inline YAML.
+        No side effects (no Kafka, no Redis writes).
+      operationId: simulate
+      tags: [Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+      responses:
+        "200":
+          description: Simulation complete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationResult'
+        "400":
+          description: Invalid ruleset YAML
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/manage/metrics:
+    get:
+      summary: Get engine metrics
+      description: Get performance and operational metrics
+      operationId: getMetrics
+      tags: [Management]
+      responses:
+        "200":
+          description: Metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token from Auth0 with required scopes
+
+  schemas:
+    TransactionContext:
+      type: object
+      description: Transaction to evaluate
+      required:
+        - transaction_id
+        - card_hash
+        - amount
+        - currency
+      properties:
+        transaction_id:
+          type: string
+          description: Unique transaction identifier
+        card_hash:
+          type: string
+          description: Tokenized card identifier
+        amount:
+          type: number
+          format: double
+          description: Transaction amount
+        currency:
+          type: string
+          description: ISO 4217 currency code (e.g., USD, EUR)
+          example: USD
+        merchant_id:
+          type: string
+          description: Merchant identifier
+        merchant_name:
+          type: string
+          description: Merchant business name
+        merchant_category:
+          type: string
+          description: Merchant category
+        merchant_category_code:
+          type: string
+          description: Merchant Category Code (MCC)
+          example: "5411"
+        card_present:
+          type: boolean
+          description: Whether physical card was present
+        transaction_type:
+          type: string
+          description: Transaction type (PURCHASE, REFUND, etc.)
+          enum: [PURCHASE, REFUND, REVERSAL, AUTHORIZATION, TRANSFER]
+        entry_mode:
+          type: string
+          description: Entry mode (ECOM, CHIP, SWIPE, CONTACTLESS)
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: US
+        ip_address:
+          type: string
+          description: IP address (IPv4 or IPv6)
+        device_id:
+          type: string
+          description: Device fingerprint/identifier
+        email:
+          type: string
+          description: User email address
+        phone:
+          type: string
+          description: User phone number
+        billing_address:
+          $ref: '#/components/schemas/Address'
+        shipping_address:
+          $ref: '#/components/schemas/Address'
+        timestamp:
+          type: string
+          format: date-time
+          description: Transaction timestamp
+        card_network:
+          type: string
+          description: Card network (VISA, MC, AMEX, etc.)
+        card_bin:
+          type: string
+          description: Bank Identification Number (first 6-8 digits)
+        card_logo:
+          type: string
+          description: Card brand logo identifier
+        decision:
+          type: string
+          description: Required for MONITORING - final decision
+          enum: [APPROVE, DECLINE]
+        custom_fields:
+          type: object
+          additionalProperties: true
+          description: Additional custom fields
+
+    Address:
+      type: object
+      properties:
+        street1:
+          type: string
+        street2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        postal_code:
+          type: string
+        country:
+          type: string
+
+    Decision:
+      type: object
+      description: Decision result from evaluation
+      properties:
+        decision_id:
+          type: string
+          description: Unique decision identifier (UUID)
+        transaction_id:
+          type: string
+          description: Transaction identifier
+        evaluation_type:
+          type: string
+          enum: [AUTH, MONITORING]
+          description: Type of evaluation performed
+        decision:
+          type: string
+          enum: [APPROVE, DECLINE]
+          description: Final decision
+        engine_mode:
+          type: string
+          enum: [NORMAL, DEGRADED, FAIL_OPEN]
+          description: Engine processing mode
+        engine_error_code:
+          type: string
+          description: Error code if not in NORMAL mode
+        engine_error_message:
+          type: string
+          description: Human-readable error message
+        ruleset_key:
+          type: string
+          description: Ruleset key used for evaluation
+        ruleset_version:
+          type: integer
+          description: Ruleset version
+        ruleset_id:
+          type: string
+          description: Ruleset UUID
+        matched_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchedRule'
+          description: Rules that matched during evaluation
+        velocity_results:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VelocityResult'
+          description: Velocity check results
+        timestamp:
+          type: string
+          format: date-time
+          description: When the decision was made
+        processing_time_ms:
+          type: integer
+          description: Processing time in milliseconds
+        timing_breakdown:
+          $ref: '#/components/schemas/TimingBreakdown'
+        transaction_context:
+          type: object
+          additionalProperties: true
+          description: Full transaction context
+
+    MatchedRule:
+      type: object
+      properties:
+        rule_id:
+          type: string
+        rule_name:
+          type: string
+        action:
+          type: string
+          enum: [APPROVE, DECLINE, REVIEW]
+        priority:
+          type: integer
+        conditions_met:
+          type: array
+          items:
+            type: string
+        condition_values:
+          type: object
+          additionalProperties: true
+        rule_version:
+          type: integer
+        matched:
+          type: boolean
+        contributing:
+          type: boolean
+
+    VelocityResult:
+      type: object
+      properties:
+        dimension:
+          type: string
+          description: Dimension name (card_hash, ip_address, etc.)
+        dimension_value:
+          type: string
+          description: Actual value being tracked (tokenized)
+        count:
+          type: integer
+          description: Current counter value
+        threshold:
+          type: integer
+          description: Threshold configured for this dimension
+        window_seconds:
+          type: integer
+          description: Time window in seconds
+        exceeded:
+          type: boolean
+          description: Whether threshold was exceeded
+        ttl_remaining:
+          type: integer
+          description: Seconds until counter window resets
+
+    TimingBreakdown:
+      type: object
+      properties:
+        total_processing_time_ms:
+          type: number
+          description: Total processing time
+        ruleset_lookup_time_ms:
+          type: number
+          description: Time to lookup ruleset
+        rule_evaluation_time_ms:
+          type: number
+          description: Time to evaluate rules
+        velocity_check_count:
+          type: integer
+          description: Number of velocity checks performed
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN]
+          example: UP
+        storageAccessible:
+          type: boolean
+          description: Whether MinIO/S3 storage is reachable
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          example: ERROR_CODE
+        message:
+          type: string
+          example: Error message
+
+    RegistryStatus:
+      type: object
+      properties:
+        totalRulesets:
+          type: integer
+          description: Number of rulesets loaded
+        countries:
+          type: integer
+          description: Number of countries with rulesets
+        storageAccessible:
+          type: boolean
+          description: Whether storage is accessible
+
+    CountryRulesets:
+      type: object
+      properties:
+        country:
+          type: string
+        keys:
+          type: array
+          items:
+            type: string
+
+    HotSwapRequest:
+      type: object
+      required:
+        - key
+        - version
+      properties:
+        key:
+          type: string
+          description: Ruleset key
+          example: CARD_AUTH
+        version:
+          type: integer
+          minimum: 1
+          description: New version to load
+          example: 2
+        country:
+          type: string
+          description: Country code (defaults to global)
+          example: global
+
+    HotSwapResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        status:
+          type: string
+          enum: [SWAPPED, NO_CHANGE, VERSION_NOT_FOUND]
+        message:
+          type: string
+        oldVersion:
+          type: integer
+          nullable: true
+        newVersion:
+          type: integer
+
+    LoadRulesetRequest:
+      type: object
+      required:
+        - key
+        - version
+      properties:
+        key:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        country:
+          type: string
+
+    LoadRulesetResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        key:
+          type: string
+        version:
+          type: integer
+        country:
+          type: string
+
+    BulkLoadRequest:
+      type: object
+      required:
+        - rulesets
+      properties:
+        rulesets:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              version:
+                type: integer
+              country:
+                type: string
+
+    BulkLoadResponse:
+      type: object
+      properties:
+        loadedCount:
+          type: integer
+        totalCount:
+          type: integer
+
+    ReplayRequest:
+      type: object
+      required:
+        - transaction
+      properties:
+        transaction:
+          $ref: '#/components/schemas/TransactionContext'
+        rulesetKey:
+          type: string
+        version:
+          type: integer
+
+    ReplayResponse:
+      type: object
+      properties:
+        decision:
+          $ref: '#/components/schemas/Decision'
+        version:
+          type: integer
+
+    BatchReplayRequest:
+      type: object
+      required:
+        - transactions
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionContext'
+        rulesetKey:
+          type: string
+        version:
+          type: integer
+
+    BatchReplayResponse:
+      type: object
+      properties:
+        totalCount:
+          type: integer
+        failureCount:
+          type: integer
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              transactionId:
+                type: string
+              decision:
+                $ref: '#/components/schemas/Decision'
+              error:
+                type: string
+
+    SimulationRequest:
+      type: object
+      required:
+        - transaction
+        - rulesetYaml
+      properties:
+        transaction:
+          $ref: '#/components/schemas/TransactionContext'
+        rulesetYaml:
+          type: string
+          description: Ruleset YAML content
+        includeDebug:
+          type: boolean
+          default: false
+
+    SimulationResult:
+      type: object
+      properties:
+        transactionId:
+          type: string
+        decision:
+          type: string
+        rulesetKey:
+          type: string
+        rulesetVersion:
+          type: integer
+        matchedRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchedRule'
+        velocityResults:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VelocityResult'
+        explanations:
+          type: array
+          items:
+            type: string
+        explanation:
+          type: string
+        evaluatedAt:
+          type: string
+          format: date-time
+        evaluationTimeMs:
+          type: number
+        engineMode:
+          type: string
+        debugInfo:
+          type: object
+          additionalProperties: true
+
+    MetricsResponse:
+      type: object
+      properties:
+        rulesetCacheSize:
+          type: integer
+        storageAccessible:
+          type: boolean
+        jvmUptime:
+          type: integer
+          description: JVM uptime in milliseconds
+        jvmMemory:
+          type: integer
+          description: JVM memory usage in bytes
+        fieldRegistryVersion:
+          type: integer
+        fieldRegistrySource:
+          type: string
+        fieldCount:
+          type: integer
+        fieldRegistryWatcherRunning:
+          type: boolean
+        fieldRegistryS3Available:
+          type: boolean
+        rulesetS3Available:
+          type: boolean
+        startupHealthy:
+          type: boolean
+
+tags:
+  - name: Evaluation
+    description: Transaction evaluation endpoints
+  - name: RulesetManagement
+    description: Ruleset loading and hot-swap endpoints
+  - name: Management
+    description: Replay, simulation, and metrics endpoints

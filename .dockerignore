@@ -1,0 +1,52 @@
+# Java build output
+target/
+*.class
+*.jar
+!pom.xml
+
+# Maven
+.mvn/
+mvnw
+mvnw.cmd
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# Python (CLI/scripts)
+__pycache__/
+*.py[cod]
+.venv/
+cli/
+scripts/
+
+# Testing
+load-testing/
+tests/
+src/test/
+src/jmh/
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Environment
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+.github/
+
+# OS
+.DS_Store
+Thumbs.db

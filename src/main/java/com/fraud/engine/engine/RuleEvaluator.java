@@ -1,0 +1,192 @@
+package com.fraud.engine.engine;
+
+import com.fraud.engine.config.EvaluationConfig;
+import com.fraud.engine.domain.DebugInfo;
+import com.fraud.engine.domain.Decision;
+import com.fraud.engine.domain.EngineMetadata;
+import com.fraud.engine.domain.Rule;
+import com.fraud.engine.domain.Ruleset;
+import com.fraud.engine.domain.TimingBreakdown;
+import com.fraud.engine.domain.TransactionContext;
+import com.fraud.engine.velocity.VelocityService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+
+@ApplicationScoped
+public class RuleEvaluator {
+
+    private static final Logger LOG = Logger.getLogger(RuleEvaluator.class);
+
+    public static final String EVAL_AUTH = "AUTH";
+    public static final String EVAL_MONITORING = "MONITORING";
+    public static final String EVAL_REPLAY_MODE = "REPLAY";
+
+    private static final boolean STATIC_DEBUG_ENABLED = EvaluationConfig.isStaticDebugEnabled();
+
+    public enum EvaluationType {
+        AUTH, MONITORING, REPLAY;
+
+        public String getValue() {
+            return name();
+        }
+    }
+
+    @Inject
+    AuthEvaluator authEvaluator;
+
+    @Inject
+    MonitoringEvaluator monitoringEvaluator;
+
+    @Inject
+    VelocityService velocityService;
+
+    @Inject
+    EvaluationConfig evaluationConfig;
+
+    public Decision evaluate(TransactionContext transaction, Ruleset ruleset) {
+        return evaluate(transaction, ruleset, false);
+    }
+
+    public Decision evaluate(TransactionContext transaction, Ruleset ruleset, boolean replayMode) {
+        long startTime = System.currentTimeMillis();
+
+        Decision decision = createDecision(transaction, ruleset, replayMode);
+        decision.setRulesetKey(ruleset.getKey());
+        decision.setRulesetVersion(ruleset.getVersion());
+        decision.setRulesetId(ruleset.getRulesetId());
+
+        DebugInfo.Builder debugBuilder = shouldCaptureDebug()
+                ? createDebugBuilder(ruleset.getKey(), "v" + ruleset.getVersion())
+                : null;
+
+        EvaluationContext context = EvaluationContext.create(
+                transaction,
+                ruleset,
+                decision,
+                replayMode,
+                startTime,
+                decision.getEngineMode(),
+                debugBuilder
+        );
+
+        try {
+            Map<String, Object> evalContext = transaction.toEvaluationContext();
+            decision.setTransactionContext(evalContext);
+
+            List<Rule> rulesToEvaluate = ruleset.getApplicableRules(
+                    transaction.getCardNetwork(),
+                    transaction.getCardBin(),
+                    transaction.getMerchantCategoryCode(),
+                    transaction.getCardLogo()
+            );
+
+            if (rulesToEvaluate.isEmpty()) {
+                LOG.warnf("No rules to evaluate for ruleset: %s", ruleset.getFullKey());
+                decision.setDecision(Decision.DECISION_APPROVE);
+                return finalizeDecision(decision, startTime, debugBuilder);
+            }
+
+            dispatchEvaluation(context);
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error during rule evaluation");
+            handleEvaluationError(decision, e);
+        }
+
+        Decision finalDecision = finalizeDecision(decision, startTime, debugBuilder);
+        scheduleVelocitySnapshot(transaction, finalDecision);
+
+        return finalDecision;
+    }
+
+    private Decision createDecision(TransactionContext transaction, Ruleset ruleset, boolean replayMode) {
+        Decision decision = new Decision(transaction.getTransactionId(), ruleset.getEvaluationType());
+        decision.setEngineMode(replayMode ? Decision.MODE_REPLAY : Decision.MODE_NORMAL);
+        return decision;
+    }
+
+    private DebugInfo.Builder createDebugBuilder(String rulesetKey, String version) {
+        return new DebugInfo.Builder()
+                .rulesetKey(rulesetKey)
+                .compiledRulesetVersion(version)
+                .compilationTimestamp(System.currentTimeMillis());
+    }
+
+    private boolean shouldCaptureDebug() {
+        if (STATIC_DEBUG_ENABLED) {
+            return true;
+        }
+        return evaluationConfig != null && evaluationConfig.shouldCaptureDebug();
+    }
+
+    private void dispatchEvaluation(EvaluationContext context) {
+        String evalType = context.getEvaluationType();
+
+        if (EVAL_AUTH.equalsIgnoreCase(evalType)) {
+            authEvaluator.evaluate(context);
+        } else if (EVAL_MONITORING.equalsIgnoreCase(evalType)) {
+            monitoringEvaluator.evaluate(context);
+        } else {
+            LOG.warnf("Unknown evaluation type: %s, defaulting to AUTH", evalType);
+            authEvaluator.evaluate(context);
+        }
+    }
+
+    private Decision finalizeDecision(Decision decision, long startTime, DebugInfo.Builder debugBuilder) {
+        long processingTimeMs = System.currentTimeMillis() - startTime;
+        decision.setProcessingTimeMs(processingTimeMs);
+
+        EngineMetadata engineMetadata = new EngineMetadata(
+                decision.getEngineMode(),
+                decision.getEngineErrorCode(),
+                decision.getEngineErrorMessage(),
+                processingTimeMs,
+                null
+        );
+        decision.setEngineMetadata(engineMetadata);
+
+        TimingBreakdown timingBreakdown = new TimingBreakdown(processingTimeMs);
+        decision.setTimingBreakdown(timingBreakdown);
+
+        if (debugBuilder != null) {
+            DebugInfo.EvaluationTiming timing = new DebugInfo.EvaluationTiming(
+                    null,
+                    processingTimeMs * 1_000_000,
+                    null
+            );
+            debugBuilder.timing(timing);
+            decision.setDebugInfo(debugBuilder.build());
+        }
+
+        LOG.debugf("Decision complete: id=%s, decision=%s, mode=%s, time=%dms",
+                decision.getDecisionId(),
+                decision.getDecision(),
+                decision.getEngineMode(),
+                decision.getProcessingTimeMs());
+        return decision;
+    }
+
+    private void scheduleVelocitySnapshot(TransactionContext transaction, Decision finalDecision) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                Map<String, Decision.VelocityResult> velocitySnapshot = velocityService.captureVelocitySnapshot(transaction);
+                finalDecision.setVelocitySnapshot(velocitySnapshot);
+            } catch (Exception ex) {
+                LOG.warnf(ex, "Failed to capture velocity snapshot");
+            }
+        });
+    }
+
+    private void handleEvaluationError(Decision decision, Exception e) {
+        decision.setEngineMode(Decision.MODE_FAIL_OPEN);
+        decision.setEngineErrorCode("EVALUATION_ERROR");
+        decision.setEngineErrorMessage("Error during rule evaluation: " + e.getMessage());
+        decision.setDecision(Decision.DECISION_APPROVE);
+        LOG.error("Evaluation error, defaulting to APPROVE (fail-open)", e);
+    }
+}

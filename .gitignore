@@ -1,0 +1,155 @@
+# =============================================================================
+# Card Fraud Rule Engine - .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Java / Maven Build Artifacts
+# -----------------------------------------------------------------------------
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+!.mvn/wrapper/maven-wrapper.jar
+
+# -----------------------------------------------------------------------------
+# Python Virtual Environment & Cache
+# -----------------------------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Python tooling cache
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# uv lock (generated, not source)
+# uv.lock
+
+# -----------------------------------------------------------------------------
+# IDE & Editor Files
+# -----------------------------------------------------------------------------
+
+# Eclipse
+.classpath
+.factorypath
+.project
+.settings/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# NetBeans
+nb-private/
+nbproject/private/
+
+# -----------------------------------------------------------------------------
+# AI Agent / Coding Assistant Session Data
+# -----------------------------------------------------------------------------
+.claude/
+.codex/
+.cursor/
+.aider*
+.copilot/
+
+# -----------------------------------------------------------------------------
+# OS Generated Files
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+nul
+NUL
+
+# -----------------------------------------------------------------------------
+# Logs & Runtime Output
+# -----------------------------------------------------------------------------
+*.log
+app.err
+prod.log
+
+# Test / latency output
+latency_results_*.json
+84%
+
+# Maven wrapper download
+.mvn/wrapper/maven-wrapper.jar
+
+# -----------------------------------------------------------------------------
+# Secrets & Environment Files (Doppler is the ONLY secrets source)
+# -----------------------------------------------------------------------------
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+*.pem
+*.key
+*.jks
+*.p12
+*.pfx
+*.keystore
+credentials.json
+service-account*.json
+
+# Doppler tokens (should never exist as files)
+.doppler.yaml
+
+# Doppler runtime files
+doppler-engine.pid
+doppler-engine.log
+
+# -----------------------------------------------------------------------------
+# Docker
+# -----------------------------------------------------------------------------
+docker-compose.override.yml
+
+# -----------------------------------------------------------------------------
+# Quarkus
+# -----------------------------------------------------------------------------
+quarkus-app/
+.quarkus/
+
+# -----------------------------------------------------------------------------
+# JMH Benchmark Output
+# -----------------------------------------------------------------------------
+jmh-result*.json
+*.jfr
+
+# -----------------------------------------------------------------------------
+# Coverage Reports (generated, not source)
+# -----------------------------------------------------------------------------
+jacoco.exec
+
+# Temporary exclusions until documentation/agent files are standardized
+docs/
+CLAUDE.md
+claude.md
+STATUS.md
+status.md
+SESSION_HANDOFF.md
