@@ -1,9 +1,14 @@
 # Setup
 
-Use this section for prerequisites and first-run setup of `card-fraud-rule-engine`.
+Prerequisites, first-run onboarding, and environment bootstrap.
 
-## Baseline Commands
+## Published Files
 
-- `uv sync`
-- `uv run dev`
-- `uv run test-unit`
+- `auth0-setup-guide.md`
+- `doppler-secrets-setup.md`
+- `redis-setup.md`
+
+## Naming Rules
+
+- Use lowercase kebab-case for new topic docs.
+- Keep this section focused; move broad cross-cutting topics to `07-reference`.
