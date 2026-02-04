@@ -1,12 +1,16 @@
 # API
 
-Contracts, schemas, endpoint examples, and integration notes.
+Contracts, schemas, endpoint references, and integration notes.
 
 ## Published Files
 
-- _No published topic file yet._
+- `decision-event-schema-v2.md`
+- `field-registry-contract.md`
+- `openapi-transaction-management.json`
+- `rule-management-requirements.md`
+- `rule-schema.md`
 
 ## Naming Rules
 
 - Use lowercase kebab-case for new topic docs.
-- Keep this section focused; move broad cross-cutting topics to `07-reference`.
+- Keep each section focused on the section purpose.

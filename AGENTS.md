@@ -188,11 +188,8 @@ When behavior changes, update all relevant docs in the same change:
 - `README.md`
 - `AGENTS.md`
 - `docs/README.md`
-- `docs/STATUS.md`
+- `docs/codemap.md`
 - `openapi/openapi.yaml` (if contract changed)
-
-Historical or superseded material belongs in `docs/archive/`.
-Do not delete historical information without archiving it first.
 
 ## 9) Cross-Repo Context
 
@@ -219,7 +216,6 @@ Rule engine reads artifacts only.
 Before ending a session:
 - Confirm changed commands and endpoint paths are accurate
 - Run the minimum relevant test command(s)
-- Update `docs/STATUS.md` if test reality changed
 - Keep `CLAUDE.md` pointing to `AGENTS.md`
 - Record only factual, verified metrics/dates
 

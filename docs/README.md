@@ -2,11 +2,6 @@
 
 Quarkus runtime for fraud decision evaluation and compiled ruleset execution.
 
-## Audience
-
-- New developers setting up this repository locally.
-- Coding agents that need deterministic, executable setup/test instructions.
-
 ## Quick Start
 
 ```powershell
@@ -18,9 +13,9 @@ uv run test-unit
 ## Documentation Standards
 
 - Keep published docs inside `docs/01-setup` through `docs/07-reference`.
-- Use lowercase kebab-case file names (for example `local-setup.md`).
-- Exceptions: `README.md`, `codemap.md`, and machine-generated contract files (for example `openapi.json`).
-- Do not publish TODO, session notes, or archive artifacts.
+- Use lowercase kebab-case file names for topic docs.
+- Exceptions: `README.md`, `codemap.md`, and generated contract artifacts (for example `openapi.json`).
+- Do not keep TODO/archive/status/session planning docs in tracked documentation.
 
 ## Section Index
 
@@ -34,41 +29,76 @@ Prerequisites, first-run onboarding, and environment bootstrap.
 
 ### `02-development` - Development
 
-Day-to-day workflows, coding conventions, and contributor practices.
+Day-to-day workflows, architecture notes, and contributor practices.
 
-- _No published topic file yet; see section README._
+- `02-development/architecture.md`
+- `02-development/gc-optimization.md`
+- `02-development/http2-guide.md`
+- `02-development/inline-simulation-design.md`
+- `02-development/jvm-warmup.md`
+- `02-development/kafka-optimization.md`
+- `02-development/performance-tuning.md`
+- `02-development/redis-lua-optimization.md`
+- `02-development/redis-tuning.md`
 
 ### `03-api` - API
 
-Contracts, schemas, endpoint examples, and integration notes.
+Contracts, schemas, endpoint references, and integration notes.
 
-- _No published topic file yet; see section README._
+- `03-api/decision-event-schema-v2.md`
+- `03-api/field-registry-contract.md`
+- `03-api/openapi-transaction-management.json`
+- `03-api/rule-management-requirements.md`
+- `03-api/rule-schema.md`
 
 ### `04-testing` - Testing
 
-Test strategy, local commands, and validation checklists.
+Test strategy, local commands, and validation playbooks.
 
-- _No published topic file yet; see section README._
+- `04-testing/e2e-testing.md`
+- `04-testing/load-testing-baseline.md`
 
 ### `05-deployment` - Deployment
 
-Local runtime/deployment patterns and release readiness notes.
+Local runtime/deployment patterns and release-readiness guidance.
 
-- _No published topic file yet; see section README._
+- `05-deployment/native-image-guide.md`
 
 ### `06-operations` - Operations
 
-Runbooks, troubleshooting, security operations, and observability.
+Runbooks, observability, troubleshooting, and security operations.
 
-- _No published topic file yet; see section README._
+- `06-operations/artifact-retention-policy.md`
+- `06-operations/checksum-mismatch.md`
+- `06-operations/disaster-recovery.md`
+- `06-operations/elevated-fail-open-rate.md`
+- `06-operations/manifest-query-failure.md`
+- `06-operations/multi-region-strategy.md`
+- `06-operations/redis-outage.md`
+- `06-operations/redis-velocity-and-replay.md`
+- `06-operations/ruleset-reload-loop.md`
+- `06-operations/slos.md`
 
 ### `07-reference` - Reference
 
-Architecture decisions, glossary, and cross-repo references.
+ADRs, glossary, and cross-repo reference material.
 
-- _No published topic file yet; see section README._
+- `07-reference/0001-runtime-reads-manifest-directly.md`
+- `07-reference/0002-auth-fail-open-default-approve.md`
+- `07-reference/0003-http-200-inband-fail-open.md`
+- `07-reference/0004-ruleset-version-nullability.md`
+- `07-reference/0005-monitoring-redis-failure-semantics.md`
+- `07-reference/0006-api-versioning-strategy.md`
+- `07-reference/0007-null-and-missing-field-semantics.md`
+- `07-reference/0008-runtime-reads-s3-manifest-only.md`
+- `07-reference/0009-compiled-ruleset-debug-mode.md`
+- `07-reference/0010-rate-limiting-strategy.md`
+- `07-reference/0012-domain-model-merge.md`
+- `07-reference/0013-zero-overhead-debug.md`
+- `07-reference/auth-model.md`
+- `07-reference/external-expectations_from_rule_engine.md`
 
 ## Core Index Files
 
-- `docs/README.md` (this index)
-- `docs/codemap.md` (developer/agent orientation map)
+- `docs/README.md`
+- `docs/codemap.md`

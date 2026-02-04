@@ -1,12 +1,20 @@
 # Development
 
-Day-to-day workflows, coding conventions, and contributor practices.
+Day-to-day workflows, architecture notes, and contributor practices.
 
 ## Published Files
 
-- _No published topic file yet._
+- `architecture.md`
+- `gc-optimization.md`
+- `http2-guide.md`
+- `inline-simulation-design.md`
+- `jvm-warmup.md`
+- `kafka-optimization.md`
+- `performance-tuning.md`
+- `redis-lua-optimization.md`
+- `redis-tuning.md`
 
 ## Naming Rules
 
 - Use lowercase kebab-case for new topic docs.
-- Keep this section focused; move broad cross-cutting topics to `07-reference`.
+- Keep each section focused on the section purpose.

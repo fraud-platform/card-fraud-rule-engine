@@ -82,8 +82,6 @@ Do not use:
 
 - Agent instructions: `AGENTS.md`
 - Docs index: `docs/README.md`
-- Current status: `docs/STATUS.md`
 - Setup guides: `docs/01-setup/`
-- ADRs: `docs/adr/`
-- Runbooks: `docs/runbooks/`
-- Historical docs: `docs/archive/`
+- ADRs: `docs/07-reference/`
+- Runbooks: `docs/06-operations/`

@@ -4,14 +4,15 @@
 
 Quarkus runtime for fraud decision evaluation and compiled ruleset execution.
 
-## Key Paths
+## Documentation Layout
 
-- `src/`: Quarkus Java source (runtime, domain, integration layers).
-- `cli/`: Command wrappers for tests and local runtime flows.
-- `e2e/`: Black-box end-to-end tests against running service instances.
-- `load-testing/`: Service-specific Locust assets and load scripts.
-- `sample-rulesets/`: Local sample rulesets used by tests and demos.
-- `docs/`: Curated onboarding and operational documentation.
+- `01-setup/`: Setup
+- `02-development/`: Development
+- `03-api/`: API
+- `04-testing/`: Testing
+- `05-deployment/`: Deployment
+- `06-operations/`: Operations
+- `07-reference/`: Reference
 
 ## Local Commands
 
@@ -19,16 +20,7 @@ Quarkus runtime for fraud decision evaluation and compiled ruleset execution.
 - `uv run doppler-local`
 - `uv run test-unit`
 
-## Local Test Commands
+## Platform Modes
 
-- `uv run test-unit`
-- `uv run test-integration`
-
-## API Note
-
-Primary API surface is evaluation and health endpoints (for example `/v1/evaluate/*`, `/api/v1/health`).
-
-## Platform Integration
-
-- Standalone mode: run this repository using its own local commands and Doppler project config.
-- Consolidated mode: run this repository through `card-fraud-platform` compose stack for cross-service validation.
+- Standalone mode: run this repository with its own local commands and Doppler config.
+- Consolidated mode: run via `card-fraud-platform` for cross-service local validation.
