@@ -27,6 +27,7 @@ AUTH hot-path performance rules:
 - `uv sync`
 - `uv run doppler-local`
 - `uv run test-unit`
+- `uv run snyk-test`
 
 ## Platform Modes
 

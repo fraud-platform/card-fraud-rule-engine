@@ -11,7 +11,7 @@ Stateless Quarkus runtime for card fraud decisioning.
 ## Quick Start
 
 Prerequisites:
-- Java 21
+- Java 21+ (Java 25 supported)
 - Maven 3.9+
 - Python 3.11+
 - `uv`
@@ -61,11 +61,12 @@ uv run test-smoke
 uv run test-integration
 uv run test-all
 uv run test-coverage
+uv run snyk-test
 ```
 
-Verified on 2026-02-03:
-- `uv run test-unit`: `485` run, `0` failed, `0` errors, `3` skipped
-- `uv run test-integration`: `36` run, `0` failed, `0` errors, `0` skipped
+Verified on 2026-02-13:
+- `uv run test-unit`: `504` run, `0` failed, `0` errors, `3` skipped
+- `uv run test-integration`: `27` run, `0` failed, `0` errors, `0` skipped
 
 ## Security and Secrets
 

@@ -8,6 +8,7 @@ Quarkus runtime for fraud decision evaluation and compiled ruleset execution.
 uv sync
 uv run doppler-local
 uv run test-unit
+uv run snyk-test
 ```
 
 ## Documentation Standards

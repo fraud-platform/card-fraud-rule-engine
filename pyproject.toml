@@ -52,6 +52,7 @@ test-e2e = "cli.test_runner:test_e2e"
 test-e2e-no-auth = "cli.test_runner:test_e2e_no_auth"
 test-load = "cli.test_runner:test_load"
 test-load-no-auth = "cli.test_runner:test_load_no_auth"
+snyk-test = "cli.snyk_gate:test"
 
 # Data setup
 test-data-setup = "cli.test_data_setup:main"

@@ -108,6 +108,7 @@ uv run doppler-local
 ### Quality
 - `uv run lint`
 - `uv run format`
+- `uv run snyk-test`
 
 ## 4) Runtime Architecture (Current)
 
@@ -155,15 +156,15 @@ OpenAPI and UI when running:
 Token verification and scope authorization are handled by the API Gateway layer.
 The rule engine trusts gateway-forwarded traffic and does not perform in-process token validation.
 
-## 7) Test Reality (Verified 2026-02-07)
+## 7) Test Reality (Verified 2026-02-13)
 
 Commands executed:
 - `uv run test-unit` -> PASS
 - `uv run test-integration` -> PASS
 
 Observed results:
-- Unit profile: `Tests run: 485, Failures: 0, Errors: 0, Skipped: 3`
-- Integration profile: `Tests run: 36, Failures: 0, Errors: 0, Skipped: 0`
+- Unit profile: `Tests run: 504, Failures: 0, Errors: 0, Skipped: 3`
+- Integration profile: `Tests run: 27, Failures: 0, Errors: 0, Skipped: 0`
 
 Notes:
 - Integration stability depended on lowercase endpoint usage in test paths.
@@ -207,6 +208,7 @@ Rule engine reads artifacts only.
 Before ending a session:
 - Confirm changed commands and endpoint paths are accurate
 - Run the minimum relevant test command(s)
+- Run `uv run snyk-test` before push when dependency/runtime versions change
 - Keep `CLAUDE.md` pointing to `AGENTS.md`
 - Record only factual, verified metrics/dates
 
