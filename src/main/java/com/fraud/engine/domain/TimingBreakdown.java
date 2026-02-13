@@ -29,6 +29,21 @@ public class TimingBreakdown {
     @JsonProperty("decision_build_time_ms")
     private Double decisionBuildTimeMs;
 
+    @JsonProperty("redis_outbox_time_ms")
+    private Double redisOutboxTimeMs;
+
+    @JsonProperty("scope_traversal_time_ms")
+    private Double scopeTraversalTimeMs;
+
+    @JsonProperty("context_creation_time_ms")
+    private Double contextCreationTimeMs;
+
+    @JsonProperty("dispatch_evaluation_time_ms")
+    private Double dispatchEvaluationTimeMs;
+
+    @JsonProperty("decision_finalization_time_ms")
+    private Double decisionFinalizationTimeMs;
+
     public TimingBreakdown() {
     }
 
@@ -84,6 +99,46 @@ public class TimingBreakdown {
         this.decisionBuildTimeMs = decisionBuildTimeMs;
     }
 
+    public Double getRedisOutboxTimeMs() {
+        return redisOutboxTimeMs;
+    }
+
+    public void setRedisOutboxTimeMs(Double redisOutboxTimeMs) {
+        this.redisOutboxTimeMs = redisOutboxTimeMs;
+    }
+
+    public Double getScopeTraversalTimeMs() {
+        return scopeTraversalTimeMs;
+    }
+
+    public void setScopeTraversalTimeMs(Double scopeTraversalTimeMs) {
+        this.scopeTraversalTimeMs = scopeTraversalTimeMs;
+    }
+
+    public Double getContextCreationTimeMs() {
+        return contextCreationTimeMs;
+    }
+
+    public void setContextCreationTimeMs(Double contextCreationTimeMs) {
+        this.contextCreationTimeMs = contextCreationTimeMs;
+    }
+
+    public Double getDispatchEvaluationTimeMs() {
+        return dispatchEvaluationTimeMs;
+    }
+
+    public void setDispatchEvaluationTimeMs(Double dispatchEvaluationTimeMs) {
+        this.dispatchEvaluationTimeMs = dispatchEvaluationTimeMs;
+    }
+
+    public Double getDecisionFinalizationTimeMs() {
+        return decisionFinalizationTimeMs;
+    }
+
+    public void setDecisionFinalizationTimeMs(Double decisionFinalizationTimeMs) {
+        this.decisionFinalizationTimeMs = decisionFinalizationTimeMs;
+    }
+
     /**
      * Creates a timing breakdown with nanosecond precision converted to milliseconds.
      */
@@ -99,6 +154,7 @@ public class TimingBreakdown {
                 ", ruleEvaluation=" + ruleEvaluationTimeMs + "ms" +
                 ", velocityCheck=" + velocityCheckTimeMs + "ms" +
                 ", velocityCount=" + velocityCheckCount +
+                ", redisOutbox=" + redisOutboxTimeMs + "ms" +
                 '}';
     }
 }

@@ -3,10 +3,14 @@ package com.fraud.engine.filter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fraud.engine.domain.Decision;
+import com.fraud.engine.domain.TransactionContext;
 import com.fraud.engine.engine.RuleEvaluator;
 import com.fraud.engine.kafka.DecisionPublisher;
+import com.fraud.engine.kafka.EventPublishException;
+import com.fraud.engine.outbox.AsyncOutboxDispatcher;
 import com.fraud.engine.resource.dto.ErrorResponse;
 import com.fraud.engine.util.DecisionNormalizer;
+import com.fraud.engine.util.RulesetKeyResolver;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
 import jakarta.inject.Inject;
@@ -57,7 +61,13 @@ public class LoadSheddingFilter implements ContainerRequestFilter, ContainerResp
     ObjectMapper objectMapper;
 
     @Inject
+    AsyncOutboxDispatcher asyncOutboxDispatcher;
+
+    @Inject
     DecisionPublisher decisionPublisher;
+
+    @Inject
+    RulesetKeyResolver rulesetKeyResolver;
 
     private Semaphore permits;
     private final AtomicLong shedCount = new AtomicLong(0);
@@ -109,10 +119,15 @@ public class LoadSheddingFilter implements ContainerRequestFilter, ContainerResp
             Decision shedDecision = createShedDecision(evaluationType, parsed, normalizedDecision);
             String jsonResponse = objectMapper.writeValueAsString(shedDecision);
 
-            if (decisionPublisher != null && shedDecision.getTransactionId() != null) {
-                decisionPublisher.publishDecision(shedDecision);
-            } else if (shedDecision.getTransactionId() == null) {
-                LOG.warn("Load shed decision missing transaction_id; skipping event publish");
+            ErrorResponse persistenceError = persistShedDecision(parsed, shedDecision, evaluationType);
+            if (persistenceError != null) {
+                requestContext.abortWith(
+                        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                                .type(MediaType.APPLICATION_JSON)
+                                .entity(persistenceError)
+                                .build()
+                );
+                return;
             }
 
             requestContext.abortWith(
@@ -143,7 +158,6 @@ public class LoadSheddingFilter implements ContainerRequestFilter, ContainerResp
      */
     private Decision createShedDecision(String evaluationType, ParsedRequest parsed, String normalizedDecision) {
         String transactionId = parsed != null ? parsed.transactionId : null;
-        String transactionType = parsed != null ? parsed.transactionType : null;
         Map<String, Object> context = parsed != null ? parsed.context : null;
 
         Decision decision = transactionId != null ? new Decision(transactionId, evaluationType) : new Decision();
@@ -155,7 +169,8 @@ public class LoadSheddingFilter implements ContainerRequestFilter, ContainerResp
         decision.setEngineErrorMessage("Request shed due to capacity limits");
         decision.setProcessingTimeMs(0);
         decision.setTransactionContext(context);
-        decision.setRulesetKey(determineRulesetKey(transactionType, evaluationType));
+        TransactionContext tx = parsed != null ? parsed.transactionContext : null;
+        decision.setRulesetKey(resolver().resolve(tx, evaluationType));
         return decision;
     }
 
@@ -168,9 +183,13 @@ public class LoadSheddingFilter implements ContainerRequestFilter, ContainerResp
             if (body.length > 0) {
                 JsonNode node = objectMapper.readTree(body);
                 parsed.transactionId = readText(node, "transaction_id", "transactionId");
-                parsed.transactionType = readText(node, "transaction_type", "transactionType");
                 parsed.decision = readText(node, "decision");
                 parsed.context = objectMapper.convertValue(node, Map.class);
+                try {
+                    parsed.transactionContext = objectMapper.convertValue(node, TransactionContext.class);
+                } catch (IllegalArgumentException ignored) {
+                    // best-effort
+                }
             }
         } catch (Exception e) {
             LOG.debugf("Failed to parse request body for load shed decision: %s", e.getMessage());
@@ -189,18 +208,6 @@ public class LoadSheddingFilter implements ContainerRequestFilter, ContainerResp
         return RuleEvaluator.EVAL_AUTH;
     }
 
-    private String determineRulesetKey(String transactionType, String evaluationType) {
-        if (transactionType == null) {
-            return "CARD_" + evaluationType;
-        }
-        return switch (transactionType.toUpperCase()) {
-            case "PURCHASE", "AUTHORIZATION" -> "CARD_" + evaluationType;
-            case "REFUND", "REVERSAL" -> "REFUND_" + evaluationType;
-            case "TRANSFER" -> "TRANSFER_" + evaluationType;
-            default -> "DEFAULT_" + evaluationType;
-        };
-    }
-
     private String readText(JsonNode node, String... names) {
         if (node == null) {
             return null;
@@ -216,9 +223,9 @@ public class LoadSheddingFilter implements ContainerRequestFilter, ContainerResp
 
     private static class ParsedRequest {
         private String transactionId;
-        private String transactionType;
         private String decision;
         private Map<String, Object> context;
+        private TransactionContext transactionContext;
     }
 
     /**
@@ -226,6 +233,55 @@ public class LoadSheddingFilter implements ContainerRequestFilter, ContainerResp
      */
     public int getAvailablePermits() {
         return permits != null ? permits.availablePermits() : maxConcurrent;
+    }
+
+    private ErrorResponse persistShedDecision(ParsedRequest parsed, Decision shedDecision, String evaluationType) {
+        try {
+            TransactionContext tx = parsed != null ? parsed.transactionContext : null;
+            if (tx == null && parsed != null && parsed.context != null) {
+                tx = objectMapper.convertValue(parsed.context, TransactionContext.class);
+            }
+            if (tx != null) {
+                shedDecision.setTransactionContext(tx.toEvaluationContext());
+            } else if (parsed != null && parsed.context != null) {
+                shedDecision.setTransactionContext(parsed.context);
+            }
+
+            if (RuleEvaluator.EVAL_AUTH.equalsIgnoreCase(evaluationType)) {
+                if (tx == null || tx.getTransactionId() == null) {
+                    LOG.warn("Load shed AUTH decision missing transaction context; skipping async durability");
+                    return null;
+                }
+                asyncOutboxDispatcher.enqueueAuth(tx, shedDecision);
+                return null;
+            }
+
+            if (shedDecision.getTransactionId() == null || decisionPublisher == null) {
+                LOG.warn("Load shed MONITORING decision missing transaction_id or publisher");
+                return new ErrorResponse("EVENT_PUBLISH_FAILED", "Failed to persist monitoring decision event");
+            }
+            decisionPublisher.publishDecisionAwait(shedDecision);
+            return null;
+        } catch (EventPublishException e) {
+            LOG.warnf(e, "Failed to publish load shed decision");
+            if (RuleEvaluator.EVAL_AUTH.equalsIgnoreCase(evaluationType)) {
+                return null;
+            }
+            return new ErrorResponse("EVENT_PUBLISH_FAILED", "Failed to persist monitoring decision event");
+        } catch (Exception e) {
+            LOG.warnf(e, "Failed to persist load shed decision");
+            if (RuleEvaluator.EVAL_AUTH.equalsIgnoreCase(evaluationType)) {
+                return null;
+            }
+            return new ErrorResponse("EVENT_PUBLISH_FAILED", "Failed to persist monitoring decision event");
+        }
+    }
+
+    private RulesetKeyResolver resolver() {
+        if (rulesetKeyResolver == null) {
+            rulesetKeyResolver = new RulesetKeyResolver();
+        }
+        return rulesetKeyResolver;
     }
 
     /**

@@ -212,13 +212,11 @@ public class SimulationService {
 @POST
 @Path("/simulate")
 @Authenticated
-@SecurityRequirement(name = "bearerAuth")
 @Operation(summary = "Simulate with custom ruleset", description = "Test with ad-hoc ruleset content")
 @APIResponse(responseCode = "200", description = "Simulation complete")
 public Response simulate(SimulationRequest request) {
 
     // Validate scope
-    if (!scopeValidator.hasScope(jwt, "replay:transactions")) {
         return Response.status(Response.Status.FORBIDDEN)
                 .entity(new ErrorResponse("MISSING_SCOPE", "Required scope: replay:transactions"))
                 .build();

@@ -113,7 +113,6 @@ If unable to fix quickly:
 ```bash
 # Update manifest to point to previous version
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/hotswap \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey": "CARD_AUTH", "version": "v2"}'
 ```
@@ -186,7 +185,6 @@ aws s3 cp ruleset.yaml s3://fraud-gov-artifacts/rulesets/CARD_AUTH/v3/ruleset.ya
 
 # Trigger reload
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/hotswap \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey":"CARD_AUTH","version":"v3"}'
 
@@ -247,7 +245,6 @@ grep "Checksum mismatch" /var/log/fraud-engine/app.log
 ```bash
 # Test with transaction that should trigger specific rule
 curl -X POST http://localhost:8081/v1/evaluate/auth \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"transaction_id":"verify-rules-001","card_hash":"test-card","amount":999.00,"currency":"USD","merchant_category_code":"7995"}'
 

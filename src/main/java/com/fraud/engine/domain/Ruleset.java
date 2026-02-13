@@ -6,11 +6,12 @@ import jakarta.validation.constraints.NotNull;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Represents a ruleset containing a collection of rules.
@@ -23,6 +24,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * - Scope buckets for efficient rule filtering
  */
 public class Ruleset {
+    private static final int APPLICABLE_RULE_CACHE_MAX_ENTRIES = 2048;
 
     @NotBlank(message = "Ruleset key is required")
     @JsonProperty("key")
@@ -67,6 +69,7 @@ public class Ruleset {
     private transient Map<String, List<Rule>> logoBuckets;
     private transient List<Rule> globalRules;
     private transient volatile boolean scopeBucketsBuilt = false;
+    private transient volatile ConcurrentHashMap<ScopeCacheKey, List<Rule>> applicableRulesCache;
 
     public Ruleset() {
     }
@@ -124,12 +127,14 @@ public class Ruleset {
         this.rules = rules != null ? new ArrayList<>(rules) : new ArrayList<>();
         invalidateCachedRules();
         this.scopeBucketsBuilt = false;
+        this.applicableRulesCache = null;
     }
 
     public void addRule(Rule rule) {
         this.rules.add(rule);
         invalidateCachedRules();
         this.scopeBucketsBuilt = false;
+        this.applicableRulesCache = null;
     }
 
     /**
@@ -139,6 +144,7 @@ public class Ruleset {
         synchronized (this) {
             cachedSortedRules = null;
         }
+        applicableRulesCache = null;
     }
 
     public Instant getCreatedAt() {
@@ -208,6 +214,7 @@ public class Ruleset {
             mccBuckets = new HashMap<>();
             logoBuckets = new HashMap<>();
             globalRules = new ArrayList<>();
+            applicableRulesCache = new ConcurrentHashMap<>();
 
             for (Rule rule : rules) {
                 if (!rule.isEnabled()) {
@@ -276,10 +283,51 @@ public class Ruleset {
      * @param logo the card logo
      * @return list of applicable rules sorted by specificity
      */
+    /**
+     * ADR-0015: Scope bucket traversal comparator.
+     * Order: scope specificity descending -> priority descending -> APPROVE-first tie-breaker.
+     */
+    private static final Comparator<Rule> SCOPE_TRAVERSAL_COMPARATOR =
+            Comparator.comparingInt((Rule r) -> r.getScope() != null ? r.getScope().getSpecificity() : 0)
+                    .reversed()
+                    .thenComparing(Comparator.comparingInt(Rule::getPriority).reversed())
+                    .thenComparing(r -> "APPROVE".equalsIgnoreCase(r.getAction()) ? 0 : 1);
+
+    private record ScopeCacheKey(String network, String bin, String mcc, String logo) {
+    }
+
     public List<Rule> getApplicableRules(String network, String bin, String mcc, String logo) {
         buildScopeBuckets();
 
-        List<Rule> applicable = new ArrayList<>();
+        String normalizedNetwork = network != null ? network.toUpperCase() : null;
+        String normalizedLogo = logo != null ? logo.toUpperCase() : null;
+        ScopeCacheKey cacheKey = new ScopeCacheKey(normalizedNetwork, bin, mcc, normalizedLogo);
+
+        ConcurrentHashMap<ScopeCacheKey, List<Rule>> cache = applicableRulesCache;
+        if (cache != null) {
+            List<Rule> cached = cache.get(cacheKey);
+            if (cached != null) {
+                return cached;
+            }
+        }
+
+        List<Rule> computed = computeApplicableRules(normalizedNetwork, bin, mcc, normalizedLogo);
+
+        if (cache != null) {
+            if (cache.size() >= APPLICABLE_RULE_CACHE_MAX_ENTRIES) {
+                cache.clear();
+            }
+            List<Rule> previous = cache.putIfAbsent(cacheKey, computed);
+            if (previous != null) {
+                return previous;
+            }
+        }
+
+        return computed;
+    }
+
+    private List<Rule> computeApplicableRules(String normalizedNetwork, String bin, String mcc, String normalizedLogo) {
+        List<Rule> applicable = new ArrayList<>(Math.max(8, globalRules != null ? globalRules.size() : 0));
 
         if (bin != null) {
             for (int len = bin.length(); len >= 1; len--) {
@@ -298,23 +346,27 @@ public class Ruleset {
             }
         }
 
-        if (network != null) {
-            List<Rule> networkRules = networkBuckets.get(network.toUpperCase());
+        if (normalizedNetwork != null) {
+            List<Rule> networkRules = networkBuckets.get(normalizedNetwork);
             if (networkRules != null) {
                 applicable.addAll(networkRules);
             }
         }
 
-        if (logo != null) {
-            List<Rule> logoRules = logoBuckets.get(logo.toUpperCase());
+        if (normalizedLogo != null) {
+            List<Rule> logoRules = logoBuckets.get(normalizedLogo);
             if (logoRules != null) {
                 applicable.addAll(logoRules);
             }
         }
 
-        applicable.addAll(globalRules);
+        if (globalRules != null) {
+            applicable.addAll(globalRules);
+        }
 
-        return applicable;
+        // ADR-0015: Sort by scope specificity -> priority -> APPROVE-first
+        applicable.sort(SCOPE_TRAVERSAL_COMPARATOR);
+        return List.copyOf(applicable);
     }
 
     /**

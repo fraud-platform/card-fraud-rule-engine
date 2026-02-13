@@ -27,10 +27,14 @@ public class MonitoringEvaluator {
     EvaluationConfig evaluationConfig;
 
     public void evaluate(EvaluationContext context) {
-        Map<String, Object> evalContext = context.transaction().toEvaluationContext();
-        List<Rule> rules = context.ruleset().getRulesByPriority();
+        Map<String, Object> evalContext = context.evalContext() != null
+                ? context.evalContext()
+                : context.transaction().toEvaluationContext();
+        List<Rule> rules = context.getRulesToEvaluate();
 
-        LOG.debugf("MONITORING evaluation: %d rules to evaluate", rules.size());
+        if (LOG.isDebugEnabled()) {
+            LOG.debugf("MONITORING evaluation: %d rules to evaluate", rules.size());
+        }
 
         List<Decision.MatchedRule> matchedRules = new ArrayList<>();
 
@@ -39,7 +43,9 @@ public class MonitoringEvaluator {
                 continue;
             }
 
-            LOG.debugf("Evaluating rule: %s (%s)", rule.getId(), rule.getName());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Evaluating rule: %s (%s)", rule.getId(), rule.getName());
+            }
 
             boolean ruleMatched = evaluateRule(rule, context.transaction(), evalContext);
             if (context.isDebugEnabled()) {
@@ -69,8 +75,10 @@ public class MonitoringEvaluator {
                 }
             }
 
-            LOG.infof("Rule matched: %s (%s) - Action: %s",
-                    rule.getId(), rule.getName(), rule.getAction());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Rule matched: %s (%s) - Action: %s",
+                        rule.getId(), rule.getName(), rule.getAction());
+            }
 
             Decision.MatchedRule matchedRule = createMatchedRule(rule);
             matchedRules.add(matchedRule);
@@ -79,8 +87,10 @@ public class MonitoringEvaluator {
         context.decision().setMatchedRules(matchedRules);
         applyMonitoringDecision(context, evalContext);
 
-        LOG.infof("MONITORING evaluation complete: %d matched, decision: %s",
-                matchedRules.size(), context.decision().getDecision());
+        if (LOG.isDebugEnabled()) {
+            LOG.debugf("MONITORING evaluation complete: %d matched, decision: %s",
+                    matchedRules.size(), context.decision().getDecision());
+        }
     }
 
     private boolean evaluateRule(Rule rule, TransactionContext transaction, Map<String, Object> context) {

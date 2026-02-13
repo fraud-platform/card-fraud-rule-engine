@@ -1,4 +1,4 @@
-﻿# Rule Schema Reference
+# Rule Schema Reference
 
 This compatibility page points to the current rule/contract artifacts:
 

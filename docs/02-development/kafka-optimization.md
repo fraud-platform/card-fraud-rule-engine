@@ -1,33 +1,29 @@
-# Kafka Producer Optimization
+# Kafka Producer Optimization (Worker Path)
 
-**Purpose:** Document Kafka producer tuning for async decision event publishing.
+**Purpose:** Producer tuning for decision events emitted by the monitoring worker (Redis Streams outbox) per ADR-0014. AUTH request latency is isolated, so producer settings can prioritize durability.
 
-**Last Updated:** 2026-02-02
-
----
+**Last Updated:** 2026-02-06
 
 ## Problem Statement
 
-Decision events are published asynchronously to Kafka. The default Quarkus/Kafka producer settings are not optimized for high-throughput scenarios.
+Decision events for AUTH traffic are published from the outbox worker.  
+We need zero-loss delivery, good batching, and bounded send behavior without adding latency to AUTH API responses.
 
----
+## Optimized Producer Settings
 
-## Optimization Applied
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| `enable.idempotence` | `true` | Prevent duplicates on retry |
+| `acks` | `all` | Require leader plus replicas |
+| `max.in.flight.requests.per.connection` | `5` | Preserve ordering with idempotence |
+| `batch.size` | `16384` | Good default for small decision payloads |
+| `linger.ms` | `5` | Better batching on worker path |
+| `compression.type` | `lz4` | Fast compression and lower network cost |
+| `delivery.timeout.ms` | `15000` | Bound send time |
+| `retries` | `2147483647` | Retry until success (idempotent producer) |
+| `retry.backoff.ms` | `50` | Fast retry cadence |
 
-### Configuration Changes
-
-| Setting | Default | Optimized | Benefit |
-|----------|---------|-----------|---------|
-| `batch.size` | 16384 (16KB) | 16384 (16KB) | Already optimal |
-| `linger.ms` | 0 | 5 | Waits 5ms to batch more messages |
-| `compression.type` | none | lz4 | LZ4 compression (fast, good ratio) |
-| `acks` | all | 1 | Fire-and-forget (reliable delivery not critical for events) |
-
----
-
-## Configuration Files Updated
-
-### application.yaml
+## Configuration (Current)
 
 ```yaml
 mp:
@@ -39,91 +35,46 @@ mp:
         bootstrap.servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
-        # Producer optimization
+        enable.idempotence: true
+        acks: all
+        max.in.flight.requests.per.connection: 5
         batch.size: 16384
         linger.ms: 5
         compression.type: lz4
-        acks: 1
+        delivery.timeout.ms: 15000
+        retries: 2147483647
+        retry.backoff.ms: 50
 ```
 
-### Profiles Updated
-- `%test` - Test mode optimization
-- `%load-test` - Load test mode optimization
-
----
+`%test` and `%load-test` profiles should mirror these settings so durability failures appear in CI and load runs.
 
 ## Trade-offs
 
-| Setting | Trade-off | Decision |
-|----------|-----------|----------|
-| **linger.ms: 5** | +5ms latency for batch improvement | ✅ Worth it for improved throughput |
-| **compression.type: lz4** | +CPU for bandwidth savings | ✅ LZ4 is fast, good compression ratio |
-| **acks: 1** | Could lose events if broker crashes before ack | ✅ Acceptable for non-critical events |
-
----
-
-## Performance Impact
-
-### Before (Defaults)
-- Messages sent immediately
-- No compression
-- Waiting for all replicas to ack
-- Higher bandwidth usage
-
-### After (Optimized)
-- 5ms batching improves throughput
-- LZ4 reduces bandwidth ~60-80%
-- acks=1 reduces latency (single replica ack)
-- Better throughput at the cost of minimal latency increase
-
----
-
-## Expected Results
-
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| Throughput | ~5K events/sec | ~8K events/sec | +60% |
-| Bandwidth | ~100 KB/s | ~30 KB/s | -70% |
-| Latency | 2ms | 7ms | +5ms (within SLO) |
-| CPU | +0.1% | +0.4% | +0.3% |
-
----
+- `linger.ms=5` adds batching delay in worker path, not AUTH path.
+- `acks=all` plus idempotence increases broker round-trips compared with `acks=1`.
+- LZ4 adds modest CPU cost but usually reduces bandwidth materially.
 
 ## Monitoring
 
-### Metrics to Watch
+Track:
 
-```bash
-# Check producer metrics
-curl http://localhost:8081/q/metrics | grep kafka
-```
-
-**Key Metrics:**
-- `kafka.producer.record-send-rate` - Records sent per second
-- `kafka.producer.record-error-rate` - Failed sends
-- `kafka.producer.request-latency-avg` - Average request latency
-
----
+- `kafka.producer.record-send-rate`
+- `kafka.producer.record-error-rate`
+- `kafka.producer.request-latency-avg`
+- `redis.pending.entries`
+- `redis.oldest.pending.age`
+- `monitoring.rules.ms`
+- `kafka.publish.ms`
 
 ## Validation
 
-### Verify Configuration
-
-```bash
-# Start application with optimized settings
-uv run doppler-local
-
-# Check producer configuration via JMX or metrics
-curl http://localhost:8081/q/metrics | grep -i kafka
-```
-
----
+1. Run worker with configured producer settings.
+2. Stop Kafka temporarily; verify Redis stream backlog grows.
+3. Restore Kafka; verify backlog drains and no dropped events.
+4. Verify AUTH latency distribution is unchanged.
 
 ## References
 
-- [Quarkus Kafka Guide](https://quarkus.io/guides/kafka)
-- [Kafka Producer Configs](https://kafka.apache.org/documentation/#producerconfigs)
-
----
-
-**End of Document**
+- ADR-0014
+- Quarkus Kafka Guide
+- Kafka Producer Configs

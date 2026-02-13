@@ -1,4 +1,4 @@
-﻿# Rule Engine Design Update - Rule Management Service Requirements
+# Rule Engine Design Update - Rule Management Service Requirements
 
 **Date:** 2026-01-17
 **Status:** For Implementation Review
@@ -276,7 +276,7 @@ async def publish_country_artifacts(
 5. Compiler output for all 4 artifact types
 
 ### Integration Tests Needed
-1. End-to-end compile â†’ publish flow
+1. End-to-end compile → publish flow
 2. S3 artifact structure verification
 3. Manifest creation for multi-artifact publish
 

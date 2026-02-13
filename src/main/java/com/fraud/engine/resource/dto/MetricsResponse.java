@@ -2,6 +2,8 @@ package com.fraud.engine.resource.dto;
 
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 
+import java.util.Map;
+
 /**
  * Metrics response.
  */
@@ -44,6 +46,19 @@ public class MetricsResponse {
 
     @Schema(description = "Whether all required artifacts were available at startup")
     public boolean startupHealthy;
+
+    // ========== Engine Counters ==========
+
+    @Schema(description = "Engine observability counters")
+    public Map<String, Long> engineCounters;
+
+    public Map<String, Long> getEngineCounters() {
+        return engineCounters;
+    }
+
+    public void setEngineCounters(Map<String, Long> engineCounters) {
+        this.engineCounters = engineCounters;
+    }
 
     public int getRulesetCacheSize() {
         return rulesetCacheSize;

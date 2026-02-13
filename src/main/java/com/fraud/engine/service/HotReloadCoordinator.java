@@ -7,6 +7,7 @@ import com.fraud.engine.loader.FieldRegistryLoader;
 import com.fraud.engine.ruleset.RulesetLoader;
 import com.fraud.engine.ruleset.RulesetRegistry;
 import com.fraud.engine.util.AlertLogger;
+import com.fraud.engine.util.EngineMetrics;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -65,6 +66,9 @@ public class HotReloadCoordinator {
 
     @Inject
     RulesetRegistry rulesetRegistry;
+
+    @Inject
+    EngineMetrics engineMetrics;
 
     private ScheduledExecutorService scheduler;
     private volatile int lastFieldRegistryVersion = -1;
@@ -174,12 +178,15 @@ public class HotReloadCoordinator {
                 if (compatible) {
                     // Versions match - safe to reload both
                     performCoordinatedReload(newFieldRegistryVersion);
+                    engineMetrics.incrementHotReloadSuccess();
                 } else {
+                    engineMetrics.incrementHotReloadFailure();
                     AlertLogger.versionMismatch("HotReloadCoordinator", newFieldRegistryVersion, lastFieldRegistryVersion);
                 }
             }
 
         } catch (Exception e) {
+            engineMetrics.incrementHotReloadFailure();
             AlertLogger.hotReloadFailed("HotReloadCoordinator", -1, lastFieldRegistryVersion, e.getMessage());
         }
     }
@@ -191,34 +198,7 @@ public class HotReloadCoordinator {
      * @return true if all rulesets are compatible, false otherwise
      */
     private boolean checkRulesetCompatibility(int fieldRegistryVersion) {
-        if (!rulesetLoader.isYamlFallbackEnabled()) {
-            return checkRulesetCompatibilityFromManifest(fieldRegistryVersion);
-        }
-
-        for (String country : rulesetRegistry.getCountries()) {
-            for (String key : rulesetRegistry.getRulesetKeys(country)) {
-                Ruleset compiled =
-                        rulesetRegistry.getRuleset(country, key);
-                if (compiled == null) {
-                    continue;
-                }
-
-                // Load the ruleset to check its field_registry_version
-                Optional<Ruleset> rulesetOpt = rulesetLoader.loadRuleset(key, compiled.getVersion());
-                if (rulesetOpt.isEmpty()) {
-                    LOG.warnf("Compatibility check: Ruleset %s/v%d not found", key, compiled.getVersion());
-                    return false;
-                }
-
-                Ruleset ruleset = rulesetOpt.get();
-                if (!ruleset.isCompatibleWith(fieldRegistryVersion)) {
-                    LOG.warnf("Compatibility check: Ruleset %s/v%d requires field registry version %d, but new version is %d",
-                            key, compiled.getVersion(), ruleset.getFieldRegistryVersion(), fieldRegistryVersion);
-                    return false;
-                }
-            }
-        }
-        return true;
+        return checkRulesetCompatibilityFromManifest(fieldRegistryVersion);
     }
 
     private boolean checkRulesetCompatibilityFromManifest(int fieldRegistryVersion) {
@@ -303,7 +283,7 @@ public class HotReloadCoordinator {
                             Ruleset latest = latestOpt.get();
                             if (latest.getVersion() > current.getVersion()) {
                                 // Check compatibility before swapping
-                                Optional<Ruleset> rulesetOpt = rulesetLoader.loadRuleset(key, latest.getVersion());
+                                Optional<Ruleset> rulesetOpt = rulesetLoader.loadCompiledRuleset(key, latest.getVersion());
                                 if (rulesetOpt.isPresent()) {
                                     Ruleset ruleset = rulesetOpt.get();
                                     if (ruleset.isCompatibleWith(actualRegistryVersion)) {

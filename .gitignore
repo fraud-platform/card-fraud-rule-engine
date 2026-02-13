@@ -95,7 +95,12 @@ prod.log
 
 # Test / latency output
 latency_results_*.json
-84%
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.pid
 
 # Maven wrapper download
 .mvn/wrapper/maven-wrapper.jar
@@ -140,6 +145,12 @@ quarkus-app/
 # -----------------------------------------------------------------------------
 jmh-result*.json
 *.jfr
+*.hprof
+*.heapdump
+*.jstack
+*.jmap
+flight-*.jfr
+jfr-*.jfr
 
 # -----------------------------------------------------------------------------
 # Coverage Reports (generated, not source)
@@ -177,4 +188,39 @@ claude.md
 STATUS.md
 status.md
 SESSION_HANDOFF.md
+
+# -----------------------------------------------------------------------------
+# Performance profiling raw artifacts (keep curated summaries, ignore raw dumps)
+# -----------------------------------------------------------------------------
+# Root ad-hoc analysis scratch files
+AUTH-ONLY-ANALYSIS-*.md
+JFR-ANALYSIS-*.md
+CURRENT-STATUS.md
+bulk-load-request.json
+run-summary-*.json
+
+# Raw JFR captures and extracted text dumps
+docs/04-testing/*.jfr
+docs/04-testing/flight-*.txt
+docs/04-testing/tmp-*.txt
+docs/04-testing/*-alloc.txt
+docs/04-testing/*-exec.txt
+docs/04-testing/*-locks.txt
+docs/04-testing/*-gc.txt
+docs/04-testing/*-gc-pause.txt
+docs/04-testing/*-young-gc.txt
+flight-*.txt
+tmp-*.txt
+*-alloc.txt
+*-exec.txt
+*-locks.txt
+*-gc.txt
+*-gc-pause.txt
+*-young-gc.txt
+
+# Session notes / transient handoff notes (non-canonical)
+docs/04-testing/session-*.md
+docs/04-testing/NEXT-SESSION-*.md
+docs/04-testing/JFR-ANALYSIS-*.md
+docs/04-testing/PROFILING-RESULTS-*.md
 

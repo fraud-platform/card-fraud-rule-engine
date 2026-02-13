@@ -1,4 +1,4 @@
-﻿# Performance Tuning Index
+# Performance Tuning Index
 
 Use these active tuning references:
 

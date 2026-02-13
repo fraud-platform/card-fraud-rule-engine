@@ -74,16 +74,6 @@
             <version>2.25.29</version>
         </dependency>
 
-        <!-- Security / JWT -->
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-smallrye-jwt</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-smallrye-jwt-build</artifactId>
-        </dependency>
-
         <!-- Configuration -->
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -170,6 +160,17 @@
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.module</groupId>
+            <artifactId>jackson-module-blackbird</artifactId>
+        </dependency>
+
+        <!-- jsoniter - 10x faster JSON serialization -->
+        <dependency>
+            <groupId>com.jsoniter</groupId>
+            <artifactId>jsoniter</artifactId>
+            <version>0.9.23</version>
         </dependency>
 
         <!-- SnakeYAML (explicit version to fix LoaderOptions compatibility) -->

@@ -67,8 +67,9 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
 # Warmup Options (set ENABLE_JVM_WARMUP=true to run warmup):
 #   See docs/JVM_WARMUP.md for details
 ENTRYPOINT ["sh", "-c", \
-    "java ${JAVA_GC_OPTS:--XX:+UseG1GC -XX:+UseStringDeduplication} \
+    "java ${JAVA_GC_OPTS:--XX:+UseG1GC -XX:+UseStringDeduplication -XX:+AlwaysPreTouch} \
     ${JAVA_CDS_OPTS:-} \
+    ${JAVA_JFR_OPTS:-} \
     -XX:MaxRAMPercentage=75.0 \
     -Dquarkus.http.host=0.0.0.0 \
     -DENABLE_JVM_WARMUP=${ENABLE_JVM_WARMUP:-false} \

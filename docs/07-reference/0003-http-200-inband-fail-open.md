@@ -1,4 +1,4 @@
-# ADR-0003: Use HTTP 200 with In-Band FAIL_OPEN Signaling (No 503 for Handled Engine Errors)
+# ADR-0003: Use HTTP 200 with In-Band FAIL_OPEN Signaling (No 503 for Handled Evaluation Errors)
 
 **Status:** Accepted
 
@@ -25,7 +25,13 @@ Enum standardization:
 ruleset version note:
 - If no ruleset was actually loaded/evaluated, `ruleset_version` must be `null` (see ADR-0004).
 
-- HTTP `503`/`5xx` is acceptable only when the engine is truly unreachable (crash, network partition, DNS/LB failure), in which case there is no response.
+- Exception introduced by ADR-0014 (durability guardrail):
+  - AUTH may return HTTP `503` with `OUTBOX_UNAVAILABLE` when the Redis Streams outbox write fails.
+  - This is a persistence guarantee failure, not an evaluation failure.
+- Kafka publish failures (`EventPublishException`) are engine-layer failures:
+  - Must return HTTP `200` with in-band `DEGRADED` (MONITORING) or `FAIL_OPEN` (AUTH) signaling.
+  - Must NOT return `503` for Kafka publish failures. The decision was already evaluated; only persistence failed.
+- Outside the outbox durability guardrail, HTTP `503`/`5xx` is acceptable only when the engine is truly unreachable (crash, network partition, DNS/LB failure), in which case there is no response.
 
 ## Rationale
 - Prevents accidental declines caused by caller-specific handling of `5xx`

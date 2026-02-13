@@ -2,6 +2,7 @@ package com.fraud.engine.startup;
 
 import com.fraud.engine.domain.Ruleset;
 import com.fraud.engine.ruleset.RulesetRegistry;
+import com.fraud.engine.util.EngineMetrics;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -29,6 +30,9 @@ public class StartupRulesetLoader {
     @Inject
     RulesetRegistry rulesetRegistry;
 
+    @Inject
+    EngineMetrics engineMetrics;
+
     @ConfigProperty(name = "app.ruleset.startup.load-enabled", defaultValue = "true")
     boolean startupLoadEnabled;
 
@@ -40,6 +44,9 @@ public class StartupRulesetLoader {
 
     @ConfigProperty(name = "app.ruleset.startup.environment", defaultValue = "local")
     String environment;
+
+    @ConfigProperty(name = "app.ruleset.startup.country", defaultValue = "US")
+    String country;
 
     /**
      * Loads rulesets at application startup.
@@ -57,22 +64,24 @@ public class StartupRulesetLoader {
         }
 
         LOG.info("Beginning startup ruleset loading...");
+        long loadStart = System.currentTimeMillis();
 
         int successCount = 0;
         int failCount = 0;
 
         for (String rulesetKey : startupRulesets) {
             try {
-                LOG.infof("Loading ruleset at startup: %s", rulesetKey);
+                LOG.infof("Loading ruleset at startup: country=%s, key=%s", country, rulesetKey);
 
-                // Load latest version via manifest
+                // Load latest version via manifest with country-partitioned path support
                 Ruleset compiled =
-                        rulesetRegistry.getOrLoadLatest(environment, rulesetKey);
+                        rulesetRegistry.getOrLoadLatest(country, rulesetKey);
 
                 if (compiled == null) {
                     String error = String.format("Failed to load ruleset: %s (not found in S3/MinIO)", rulesetKey);
                     LOG.error(error);
 
+                    engineMetrics.incrementStartupRulesetFailure();
                     if (failFast) {
                         throw new IllegalStateException("Startup ruleset loading failed: " + error);
                     }
@@ -85,6 +94,7 @@ public class StartupRulesetLoader {
 
             } catch (Exception e) {
                 LOG.errorf(e, "Error loading ruleset at startup: %s", rulesetKey);
+                engineMetrics.incrementStartupRulesetFailure();
 
                 if (failFast) {
                     throw new IllegalStateException("Startup ruleset loading failed for: " + rulesetKey, e);
@@ -92,6 +102,8 @@ public class StartupRulesetLoader {
                 failCount++;
             }
         }
+
+        engineMetrics.recordStartupLoadTime(System.currentTimeMillis() - loadStart);
 
         if (successCount > 0) {
             LOG.infof("Startup ruleset loading complete: %d loaded, %d failed", successCount, failCount);

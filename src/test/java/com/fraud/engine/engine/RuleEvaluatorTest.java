@@ -6,6 +6,7 @@ import com.fraud.engine.domain.Rule;
 import com.fraud.engine.domain.Ruleset;
 import com.fraud.engine.domain.TransactionContext;
 import com.fraud.engine.config.EvaluationConfig;
+import com.fraud.engine.util.EngineMetrics;
 import com.fraud.engine.velocity.VelocityService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,12 +43,23 @@ class RuleEvaluatorTest {
         setEvaluationConfig(evaluationConfig);
         setAuthEvaluator(new AuthEvaluator());
         setMonitoringEvaluator(new MonitoringEvaluator());
+        setEngineMetrics(new EngineMetrics());
 
         // Inject VelocityService and EvaluationConfig into evaluators
         setAuthEvaluatorVelocityService(velocityService);
         setAuthEvaluatorEvaluationConfig(evaluationConfig);
         setMonitoringEvaluatorVelocityService(velocityService);
         setMonitoringEvaluatorEvaluationConfig(evaluationConfig);
+    }
+
+    private void setEngineMetrics(EngineMetrics metrics) {
+        try {
+            var field = RuleEvaluator.class.getDeclaredField("engineMetrics");
+            field.setAccessible(true);
+            field.set(ruleEvaluator, metrics);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void setVelocityService(VelocityService vs) {
@@ -244,6 +257,40 @@ class RuleEvaluatorTest {
         assertThat(decision.getDecision()).isEqualTo("APPROVE");
         assertThat(decision.getEngineMode()).isEqualTo(Decision.MODE_DEGRADED);
         assertThat(decision.getEngineErrorCode()).isEqualTo("INVALID_DECISION");
+    }
+
+    @Test
+    void testMONITORING_EvaluationErrorPreservesDecisionAndReturnsDegraded() {
+        MonitoringEvaluator brokenMonitoringEvaluator = org.mockito.Mockito.mock(MonitoringEvaluator.class);
+        doThrow(new RuntimeException("boom")).when(brokenMonitoringEvaluator).evaluate(any());
+        setMonitoringEvaluator(brokenMonitoringEvaluator);
+
+        Ruleset ruleset = createMONITORINGRuleset();
+        TransactionContext txn = createTransaction(600.00, "CA");
+        txn.setTransactionType("PURCHASE");
+        txn.setDecision("DECLINE");
+
+        Decision decision = ruleEvaluator.evaluate(txn, ruleset);
+
+        assertThat(decision.getEngineMode()).isEqualTo(Decision.MODE_DEGRADED);
+        assertThat(decision.getDecision()).isEqualTo("DECLINE");
+        assertThat(decision.getEngineErrorCode()).isEqualTo("EVALUATION_ERROR");
+    }
+
+    @Test
+    void testAUTH_EvaluationErrorRemainsFailOpenApprove() {
+        AuthEvaluator brokenAuthEvaluator = org.mockito.Mockito.mock(AuthEvaluator.class);
+        doThrow(new RuntimeException("boom")).when(brokenAuthEvaluator).evaluate(any());
+        setAuthEvaluator(brokenAuthEvaluator);
+
+        Ruleset ruleset = createAUTHRuleset();
+        TransactionContext txn = createTransaction(600.00, "CA");
+
+        Decision decision = ruleEvaluator.evaluate(txn, ruleset);
+
+        assertThat(decision.getEngineMode()).isEqualTo(Decision.MODE_FAIL_OPEN);
+        assertThat(decision.getDecision()).isEqualTo("APPROVE");
+        assertThat(decision.getEngineErrorCode()).isEqualTo("EVALUATION_ERROR");
     }
 
     @Test

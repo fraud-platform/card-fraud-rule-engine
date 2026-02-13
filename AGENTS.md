@@ -93,9 +93,8 @@ uv run doppler-local
 - `uv run doppler-load-test`
 - `uv run doppler-secrets-verify`
 
-### Auth0
-- `uv run auth0-bootstrap`
-- `uv run auth0-verify`
+### Gateway Auth
+- Authentication is enforced at API Gateway; rule engine does not validate tokens on-box.
 
 ### Java and E2E tests
 - `uv run test-unit`
@@ -104,9 +103,7 @@ uv run doppler-local
 - `uv run test-all`
 - `uv run test-coverage`
 - `uv run test-e2e`
-- `uv run test-e2e-no-auth`
 - `uv run test-load`
-- `uv run test-load-no-auth`
 
 ### Quality
 - `uv run lint`
@@ -121,13 +118,14 @@ Primary responsibilities:
 - MONITORING evaluation: all-matching analytics path, requires input `decision`
 - Redis velocity checks (atomic counters + Lua)
 - Ruleset loading/hot reload from MinIO/S3
-- Decision event publishing to Redpanda/Kafka
+- Ruleset namespace is fixed to `CARD_AUTH` (AUTH) and `CARD_MONITORING` (MONITORING)
+- Decision path: AUTH returns immediately after evaluation and enqueues `{tx, authDecision}` for async durability; background writer persists to Redis Streams, AUTH publisher publishes to Redpanda/Kafka with ack, and MONITORING worker is optional/off by default
 
 Core dependencies:
 - Redis 8.x
 - Redpanda (Kafka API)
 - MinIO (artifact read path)
-- Auth0 M2M JWT validation
+- API Gateway-authenticated ingress (token verification offloaded upstream)
 - Doppler secrets
 
 ## 5) API Surface (Current)
@@ -154,21 +152,10 @@ OpenAPI and UI when running:
 
 ## 6) Authentication and Authorization
 
-Model: M2M-only, scope-based Auth0.
+Token verification and scope authorization are handled by the API Gateway layer.
+The rule engine trusts gateway-forwarded traffic and does not perform in-process token validation.
 
-Expected scopes:
-- `execute:rules`
-- `read:results`
-- `replay:transactions`
-- `read:metrics`
-
-JWT bypass for local-only development is supported via:
-- `APP_ENV=local`
-- `SECURITY_SKIP_JWT_VALIDATION=true`
-
-Bypass must fail startup outside local env.
-
-## 7) Test Reality (Verified 2026-02-03)
+## 7) Test Reality (Verified 2026-02-07)
 
 Commands executed:
 - `uv run test-unit` -> PASS
@@ -210,6 +197,10 @@ Rule engine reads artifacts only.
 - Doppler missing/invalid session -> run `doppler login`
 - Wrong path casing (`/AUTH`, `/MONITORING`) -> use lowercase paths
 - Running raw Maven directly -> switch to `uv run ...` wrappers
+- Redis Streams outbox down -> AUTH must fail fast; ensure Redis is up with AOF + replica before load tests (see ADR-0014)
+- Load test shows 250ms+ P50 -> do NOT use `mvn quarkus:dev` for load testing; JaCoCo agent + dev mode adds massive overhead. Use the packaged JAR instead (see `docs/04-testing/jar-based-load-testing.md`).
+- LoadSheddingFilter rejects requests -> `app.load-shedding.enabled: false` in `%load-test` profile (previously defaults to 100 max-concurrent)
+- Redis operations hang -> all Redis ops now have 5s bounded timeouts (configurable via `OUTBOX_REDIS_TIMEOUT_SECONDS`)
 
 ## 11) Agent Handoff Checklist
 
@@ -219,4 +210,35 @@ Before ending a session:
 - Keep `CLAUDE.md` pointing to `AGENTS.md`
 - Record only factual, verified metrics/dates
 
-Last updated: 2026-02-03
+## 12) Load Testing (Critical)
+
+**CRITICAL:** Both `uv run doppler-local` and `uv run doppler-load-test` use `mvn quarkus:dev` which includes JaCoCo instrumentation and dev mode overhead. These are NOT suitable for performance measurement.
+
+**Measured dev mode overhead:** AUTH P50 280ms (vs 5-7ms single request) - 50x slower under load
+
+For valid load test results, use the packaged JAR:
+
+```bash
+# Build (once)
+doppler run --config local -- mvn package -DskipTests -Dquarkus.package.jar.type=uber-jar
+
+# Run with load-test profile (disables load shedding, sets WARN logging)
+doppler run --config local -- \
+  java -jar target/card-fraud-rule-engine-1.0.0-SNAPSHOT-runner.jar \
+  -Dquarkus.profile=load-test
+```
+
+**See:** `docs/04-testing/jar-based-load-testing.md` for complete instructions
+
+E2E load testing repo: `card-fraud-e2e-load-testing/`
+```bash
+cd C:\Users\kanna\github\card-fraud-e2e-load-testing
+uv run lt-run --service rule-engine --users=200 --spawn-rate=20 --run-time=2m --scenario baseline --headless
+```
+
+**Load test configuration (`%load-test` profile):**
+- `app.load-shedding.enabled: false` - Measure true capacity
+- `quarkus.log.level: WARN` - Suppress hot-path logging
+- `app.outbox.redis-timeout-seconds: 5` - Bounded Redis timeouts
+
+Last updated: 2026-02-07

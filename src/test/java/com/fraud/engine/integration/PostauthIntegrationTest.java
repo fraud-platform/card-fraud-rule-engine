@@ -1,17 +1,10 @@
 package com.fraud.engine.integration;
 
-import com.fraud.engine.ruleset.RulesetRegistry;
-import com.fraud.engine.security.ScopeValidator;
-import com.fraud.engine.testutil.TestSecuritySetup;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.InjectMock;
-import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import jakarta.inject.Inject;
 import java.math.BigDecimal;
 import java.util.Map;
 
@@ -20,24 +13,9 @@ import static org.hamcrest.Matchers.*;
 
 /**
  * Integration tests for MONITORING evaluation.
- *
- * <p>These tests use {@link TestSecurity} with mocked {@link ScopeValidator}
- * to bypass authentication checks in test mode.</p>
  */
 @QuarkusTest
 class MonitoringIntegrationTest {
-
-    @InjectMock
-    ScopeValidator scopeValidator;
-
-    @Inject
-    RulesetRegistry rulesetRegistry;
-
-    @BeforeEach
-    void setUp() {
-        // Bypass all scope checks for these tests
-        TestSecuritySetup.allowAllScopes(scopeValidator);
-    }
 
     private TransactionContext createTransaction(String txnId, String cardHash, double amount) {
         TransactionContext txn = new TransactionContext();
@@ -48,7 +26,6 @@ class MonitoringIntegrationTest {
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testMonitoringBasicEvaluation() {
         TransactionContext txn = createTransaction("txn-monitoring-001", "card-123", 600.00);
         txn.setTransactionType("PURCHASE");
@@ -67,7 +44,6 @@ class MonitoringIntegrationTest {
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testMonitoringLowAmount() {
         TransactionContext txn = createTransaction("txn-monitoring-002", "card-456", 100.00);
         txn.setTransactionType("PURCHASE");
@@ -84,7 +60,6 @@ class MonitoringIntegrationTest {
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testMonitoringHasDecisionId() {
         TransactionContext txn = createTransaction("txn-monitoring-id", "card-id", 100.00);
         txn.setTransactionType("PURCHASE");
@@ -101,7 +76,6 @@ class MonitoringIntegrationTest {
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testMonitoringHasTimestampAndProcessingTime() {
         TransactionContext txn = createTransaction("txn-monitoring-time", "card-time", 100.00);
         txn.setTransactionType("PURCHASE");
@@ -119,7 +93,6 @@ class MonitoringIntegrationTest {
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testMonitoringMissingDecision_BadRequest() {
         Map<String, Object> payload = Map.of(
                 "transaction_id", "txn-monitoring-missing",
@@ -139,7 +112,6 @@ class MonitoringIntegrationTest {
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testMonitoringInvalidDecision_BadRequest() {
         Map<String, Object> payload = Map.of(
                 "transaction_id", "txn-monitoring-invalid",

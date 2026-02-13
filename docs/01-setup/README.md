@@ -4,7 +4,6 @@ Prerequisites, first-run onboarding, and environment bootstrap.
 
 ## Published Files
 
-- `auth0-setup-guide.md`
 - `doppler-secrets-setup.md`
 - `redis-setup.md`
 

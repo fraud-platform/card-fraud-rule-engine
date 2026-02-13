@@ -1,4 +1,4 @@
-﻿# Disaster Recovery Overview
+# Disaster Recovery Overview
 
 This document is a compatibility target for older links.
 

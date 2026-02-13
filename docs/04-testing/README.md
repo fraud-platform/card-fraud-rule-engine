@@ -5,7 +5,10 @@ Test strategy, local commands, and validation playbooks.
 ## Published Files
 
 - `e2e-testing.md`
+- `auth-only-slo-and-async-durability.md`
 - `load-testing-baseline.md`
+- `performance-findings-summary.md`
+- `powershell-load-testing-runbook.md`
 
 ## Naming Rules
 

@@ -2,23 +2,25 @@
 
 **Severity:** P1 - High
 **Service:** card-fraud-rule-engine
-**Component:** VelocityService (Redis)
-**Last Updated:** 2026-01-24
+**Component:** VelocityService (Redis) + Redis Streams Outbox (ADR-0014)
+**Last Updated:** 2026-02-05
 
 ---
 
 ## Symptoms
 
 - **Alerts:**
-  - `VelocityCheckFailure` alert firing
-  - `RedisConnectionTimeout` alert firing
-  - `CircuitBreakerOpen` alert for VelocityService
+- `VelocityCheckFailure` alert firing
+- `RedisConnectionTimeout` alert firing
+- `CircuitBreakerOpen` alert for VelocityService
+- `OutboxBacklogHigh` or `redis.pending.entries` growing (auth enqueues to Redis Streams)
 
 - **Metrics:**
   - `velocity_check_errors_total` increasing rapidly
   - `redis_connection_pool_exhausted` > 0
-  - `decision_engine_mode{mode="DEGRADED"}` gauge = 1
-  - Increased `engine_mode=FAIL_OPEN` (AUTH) and/or `engine_mode=DEGRADED` (MONITORING)
+- `decision_engine_mode{mode="DEGRADED"}` gauge = 1
+- Increased `engine_mode=FAIL_OPEN` (AUTH) and/or `engine_mode=DEGRADED` (MONITORING)
+- `redis.oldest.pending.age` rising; `redis.pending.entries` > threshold
 
 - **Logs:**
   - `WARN [VelocityService] Velocity check circuit breaker open`
@@ -37,8 +39,8 @@
 | Severity | Description |
 |----------|-------------|
 | **Financial** | Velocity-based fraud detection disabled; potential for increased fraud losses |
-| **Operational** | Engine operates in degraded mode with fail-open semantics |
-| **Data** | Velocity counters not being updated; counters will reset when Redis recovers |
+| **Operational** | Engine operates in degraded mode with fail-open semantics; monitoring worker may stall if outbox unreachable |
+| **Data** | Velocity counters not updated; outbox entries may fail to enqueue/ack; if Redis is down, AUTH rejects instead of losing events |
 
 **Note:** The rule engine is designed to fail-open. AUTH transactions will still be processed with APPROVE as the default action when velocity checks fail.
 
@@ -46,7 +48,7 @@
 
 ## Diagnosis
 
-### 1. Verify Redis Connectivity
+### 1. Verify Redis Connectivity (velocity + streams)
 
 ```bash
 # Check Redis container status
@@ -74,6 +76,10 @@ curl -s http://localhost:8081/q/metrics | grep velocity_check_errors
 ```bash
 # Redis memory usage
 redis-cli INFO memory | grep used_memory_human
+
+# Check stream depth
+redis-cli XLEN fraud:outbox
+redis-cli XINFO CONSUMERS fraud:outbox auth-monitoring-worker
 
 # Redis connection count
 redis-cli INFO clients | grep connected_clients
@@ -142,6 +148,7 @@ redis-cli -h sentinel-host -p 26379 SENTINEL FAILOVER mymaster
 1. **Redis High Availability:**
    - Use Redis Sentinel or Cluster for automatic failover
    - Configure appropriate replicas (min 3 for production)
+   - Enable AOF with `appendfsync everysec`, `min-replicas-to-write 1`, `min-replicas-max-lag 2` (required for outbox durability)
 
 2. **Connection Pool Tuning:**
    - Monitor `redis_connection_pool_active` metric
@@ -248,7 +255,6 @@ curl -s http://localhost:8081/q/metrics | grep velocity_check_errors_total
 ```bash
 # Send test transactions
 curl -X POST http://localhost:8081/v1/evaluate/auth \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"transaction_id":"test-verify-001","card_hash":"test-card-1","amount":50.00,"currency":"USD","merchant_category_code":"5411","country_code":"US"}'
 

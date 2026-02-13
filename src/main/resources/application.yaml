@@ -16,14 +16,24 @@ quarkus:
     # Enable HTTP/2 with ALPN for TLS connections
     # Note: HTTP/2 is available over plain HTTP for development
     # For production, use TLS for true HTTP/2 with ALPN
+    # IO thread pool for request handling
+    io-threads: ${HTTP_IO_THREADS:32}  # Increased from default 8*cores
+
+  # Thread pool configuration for blocking operations
+  thread-pool:
+    max-threads: ${THREAD_POOL_MAX_THREADS:20}  # Correct Quarkus 3.x property (was vertx.worker-pool-size)
+
+  # Vert.x configuration
+  vertx:
+    max-worker-execute-time: 30s
 
   # Redis Configuration (via environment - Doppler)
   redis:
     hosts: ${REDIS_URL:redis://localhost:6379}
-    # Connection pool tuning for 10K TPS
-    # Default: maxPoolSize=6, maxWaitingHandlers=50
-    max-pool-size: ${REDIS_MAX_POOL_SIZE:20}
-    max-waiting-handlers: ${REDIS_MAX_WAITING_HANDLERS:100}
+    # Connection pool tuning (morning test: 20/100 achieved P50=83ms)
+    # Default: maxPoolSize=6, maxWaitingHandlers=2048
+    max-pool-size: ${REDIS_MAX_POOL_SIZE:20}  # Morning baseline value
+    max-waiting-handlers: ${REDIS_MAX_WAITING_HANDLERS:100}  # Morning baseline value
     # Connection timeout (milliseconds)
     timeout: ${REDIS_TIMEOUT:5s}
     # Protocol version (RESP3 is faster)
@@ -32,11 +42,6 @@ quarkus:
   # Kafka Configuration (via environment - Doppler)
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-
-  # JWT / Auth0 Configuration
-  # Set SECURITY_SKIP_JWT_VALIDATION=true for local development (only works when APP_ENV=local)
-  smallrye-jwt:
-    enabled: true
 
   # Logging - Use INFO by default, DEBUG only for specific categories
   log:
@@ -75,10 +80,20 @@ s3:
 
 # Application-specific Configuration
 app:
-  security:
-    # Environment for security validation (local, test, prod)
-    # SECURITY_SKIP_JWT_VALIDATION is only allowed in 'local' environment
-    environment: ${APP_ENV:local}
+  # JSON Serialization
+  # jsoniter is DISABLED by default due to Java 17 module system incompatibility:
+  # - InaccessibleObjectException when serializing java.time.Instant fields
+  # - Requires --add-opens JVM flags (not recommended for production)
+  # - Not natively supported by Quarkus
+  #
+  # Current solution: Jackson + Blackbird (20-30% faster serialization)
+  # Future: Retry jsoniter when Java 17 support is added
+  jsoniter:
+    enabled: ${JSONITER_ENABLED:false}
+
+  load-shedding:
+    enabled: ${LOAD_SHEDDING_ENABLED:true}
+    max-concurrent: ${LOAD_SHEDDING_MAX_CONCURRENT:100}
   ruleset:
     bucket: ${S3_BUCKET_NAME:fraud-gov-artifacts}
     path-prefix: rulesets/
@@ -109,15 +124,32 @@ app:
   decision:
     fail-open: true
     default-decision: APPROVE
+  outbox:
+    mode: ${OUTBOX_MODE:redis}
+    stream-key: ${OUTBOX_STREAM_KEY:fraud:outbox}
+    consumer-group: ${OUTBOX_CONSUMER_GROUP:auth-monitoring-worker}
+    consumer-name: ${OUTBOX_CONSUMER_NAME:auto}
+    maxlen: ${OUTBOX_MAXLEN:200000}
+    read-count: ${OUTBOX_READ_COUNT:50}
+    block-ms: ${OUTBOX_BLOCK_MS:2000}
+    redis-timeout-seconds: ${OUTBOX_REDIS_TIMEOUT_SECONDS:5}
+    pending-claim-min-idle-ms: ${OUTBOX_PENDING_CLAIM_MIN_IDLE_MS:60000}
+    pending-claim-count: ${OUTBOX_PENDING_CLAIM_COUNT:50}
+    pending-summary-interval-ms: ${OUTBOX_PENDING_SUMMARY_INTERVAL_MS:5000}
+    worker:
+      enabled: ${OUTBOX_WORKER_ENABLED:false}
+    auth-publisher:
+      enabled: ${OUTBOX_AUTH_PUBLISHER_ENABLED:true}
+      poll-interval-ms: ${OUTBOX_AUTH_PUBLISHER_POLL_INTERVAL_MS:50}
+
+  auth:
+    async-durability:
+      enabled: ${AUTH_ASYNC_DURABILITY_ENABLED:true}
+      queue-capacity: ${AUTH_ASYNC_DURABILITY_QUEUE_CAPACITY:10000}
+      poll-interval-ms: ${AUTH_ASYNC_DURABILITY_POLL_INTERVAL_MS:5}
 
 # Messaging - Decision Events
 mp:
-  jwt:
-    verify:
-      issuer: https://${AUTH0_DOMAIN}/
-      publickey:
-        location: https://${AUTH0_DOMAIN}/.well-known/jwks.json
-      audiences: ${AUTH0_AUDIENCE}
   messaging:
     outgoing:
       decision-events:
@@ -126,11 +158,16 @@ mp:
         bootstrap.servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
-        # Producer optimization for async decision events
-        batch.size: 16384                    # 16KB batches for better throughput
-        linger.ms: 5                        # 5ms wait to batch more messages
-        compression.type: lz4                 # LZ4 compression (fast, good ratio)
-        acks: 1                             # Fire-and-forget for decision events (reliable delivery not critical)
+        # Producer optimization for outbox worker (idempotent + durable)
+        enable.idempotence: true
+        acks: all
+        max.in.flight.requests.per.connection: 5
+        batch.size: 16384
+        linger.ms: 5
+        compression.type: lz4
+        delivery.timeout.ms: 15000
+        retries: 2147483647
+        retry.backoff.ms: 50
 
 # Profile-specific overrides
 "%dev":
@@ -143,8 +180,6 @@ mp:
       enabled: false
     devservices:
       enabled: false  # Disable dev services, use our docker-compose infra
-    smallrye-jwt:
-      enabled: false  # Disable JWT verification in dev mode
     swagger-ui:
       always-include: true
   smallrye:
@@ -166,8 +201,6 @@ mp:
         enable: false  # Set to true for JSON format (when log collector supports it)
     http:
       port: 8081
-    smallrye-jwt:
-      enabled: true
   app:
     ruleset:
       startup:
@@ -182,8 +215,6 @@ mp:
       bootstrap-servers: localhost:9092
     smallrye-fault-tolerance:
       enabled: false
-    smallrye-jwt:
-      enabled: false  # Disable JWT verification in test mode
   smallrye:
     faulttolerance:
       enabled: false
@@ -200,26 +231,40 @@ mp:
           bootstrap.servers: localhost:9092
           key.serializer: org.apache.kafka.common.serialization.StringSerializer
           value.serializer: org.apache.kafka.common.serialization.StringSerializer
-          # Producer optimization
+          # Producer optimization (mirror prod)
+          enable.idempotence: true
+          acks: all
+          max.in.flight.requests.per.connection: 5
           batch.size: 16384
           linger.ms: 5
           compression.type: lz4
-          acks: 1
+          delivery.timeout.ms: 15000
+          retries: 2147483647
+          retry.backoff.ms: 50
+  app:
+    outbox:
+      mode: in-memory
 
-# Load Test Profile - Enables JWT for authenticated load testing
+# Load Test Profile
 "%load-test":
   quarkus:
-    smallrye-jwt:
-      enabled: true  # Enable JWT validation for load testing
     log:
-      level: INFO
+      level: WARN
+      category:
+        "com.fraud.engine":
+          level: WARN  # Suppress hot-path logging for throughput
     swagger-ui:
       always-include: false
-    app:
-      ruleset:
-        startup:
-          load-enabled: false  # Disable startup loading for load tests
-          fail-fast: false
+  app:
+    load-shedding:
+      enabled: false  # Disable load shedding for load tests to measure true capacity
+    ruleset:
+      startup:
+        load-enabled: false  # Disable startup loading for load tests
+        fail-fast: false
+    outbox:
+      worker:
+        enabled: false  # Disable monitoring worker for AUTH-only perf runs
   mp:
     messaging:
       outgoing:
@@ -229,8 +274,13 @@ mp:
           bootstrap.servers: localhost:9092
           key.serializer: org.apache.kafka.common.serialization.StringSerializer
           value.serializer: org.apache.kafka.common.serialization.StringSerializer
-          # Producer optimization
+          # Producer optimization (mirror durable settings)
+          enable.idempotence: true
+          acks: all
+          max.in.flight.requests.per.connection: 5
           batch.size: 16384
           linger.ms: 5
           compression.type: lz4
-          acks: 1
+          delivery.timeout.ms: 15000
+          retries: 2147483647
+          retry.backoff.ms: 50

@@ -1,6 +1,6 @@
 # Redis Velocity & Transaction Replay - Technical Decisions
 
-This document covers Redis velocity behavior in the runtime engine and the limitations of transaction replay.
+This document covers Redis velocity behavior in the runtime engine and the limitations of transaction replay. Redis also backs the Redis Streams outbox for auth→monitoring (ADR-0014); that flow is documented separately. This file focuses on velocity semantics.
 
 **Important:** Redis-backed velocity is an ONLINE mechanism. True point-in-time replay with historical velocity is currently **deferred**.
 

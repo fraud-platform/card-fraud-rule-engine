@@ -1,6 +1,5 @@
 package com.fraud.engine;
 
-import com.fraud.engine.config.SecurityConfig;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.QuarkusApplication;
 import io.quarkus.runtime.ShutdownEvent;
@@ -48,9 +47,6 @@ class ApplicationLifecycleObserver {
 
     private static final Logger LOG = Logger.getLogger(ApplicationLifecycleObserver.class);
 
-    @Inject
-    SecurityConfig securityConfig;
-
     /**
      * Flag indicating shutdown is in progress.
      * Used by health checks and request filters.
@@ -62,11 +58,6 @@ class ApplicationLifecycleObserver {
      */
     void onStart(@Observes StartupEvent event) {
         LOG.info("Card Fraud Rule Engine starting...");
-
-        // Validate security configuration
-        if (securityConfig != null) {
-            securityConfig.validateSecurityConfiguration();
-        }
 
         LOG.info("Card Fraud Rule Engine started successfully");
         LOG.infof("Shutdown flag: %s", SHUTTING_DOWN.get());

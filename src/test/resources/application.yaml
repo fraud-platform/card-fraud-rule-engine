@@ -1,6 +1,6 @@
 # Test Configuration for Unit Tests
 # This file provides test values for all required configuration
-# No external dependencies (Auth0, MinIO, Doppler) required for unit tests
+# No external dependencies (MinIO, Doppler) required for unit tests
 
 quarkus:
   application:
@@ -22,10 +22,6 @@ quarkus:
   # Kafka Configuration
   kafka:
     bootstrap-servers: localhost:9092
-
-  # Disable JWT verification for unit tests
-  smallrye-jwt:
-    enabled: false
 
   # Disable fault tolerance for tests
   smallrye-fault-tolerance:
@@ -104,12 +100,6 @@ app:
 
 # Messaging Configuration for Tests
 mp:
-  jwt:
-    verify:
-      issuer: https://test.auth0.com/
-      publickey:
-        location: https://test.auth0.com/.well-known/jwks.json
-      audiences: test-audience
   messaging:
     outgoing:
       decision-events:
@@ -134,8 +124,6 @@ smallrye:
     kafka:
       bootstrap-servers: localhost:9092
     smallrye-fault-tolerance:
-      enabled: false
-    smallrye-jwt:
       enabled: false
   smallrye:
     faulttolerance:

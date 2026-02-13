@@ -23,7 +23,6 @@ uv run test-unit
 
 Prerequisites, first-run onboarding, and environment bootstrap.
 
-- `01-setup/auth0-setup-guide.md`
 - `01-setup/doppler-secrets-setup.md`
 - `01-setup/redis-setup.md`
 
@@ -37,6 +36,7 @@ Day-to-day workflows, architecture notes, and contributor practices.
 - `02-development/inline-simulation-design.md`
 - `02-development/jvm-warmup.md`
 - `02-development/kafka-optimization.md`
+- `02-development/performance-tuning-plan.md`
 - `02-development/performance-tuning.md`
 - `02-development/redis-lua-optimization.md`
 - `02-development/redis-tuning.md`
@@ -56,7 +56,12 @@ Contracts, schemas, endpoint references, and integration notes.
 Test strategy, local commands, and validation playbooks.
 
 - `04-testing/e2e-testing.md`
+- `04-testing/auth-only-slo-and-async-durability.md`
 - `04-testing/load-testing-baseline.md`
+- `04-testing/performance-findings-summary.md`
+- `04-testing/powershell-load-testing-runbook.md`
+
+Load testing defaults to pre-loading compiled `CARD_AUTH` and `CARD_MONITORING` rulesets before traffic generation.
 
 ### `05-deployment` - Deployment
 
@@ -95,8 +100,13 @@ ADRs, glossary, and cross-repo reference material.
 - `07-reference/0010-rate-limiting-strategy.md`
 - `07-reference/0012-domain-model-merge.md`
 - `07-reference/0013-zero-overhead-debug.md`
-- `07-reference/auth-model.md`
+- `07-reference/0014-auth-monitoring-redis-streams-outbox.md`
+- `07-reference/0018-auth-hot-path-auth-only-async-durability.md`
+- `07-reference/0019-redis-streams-pending-recovery-and-retries.md`
 - `07-reference/external-expectations_from_rule_engine.md`
+
+Auth model note:
+- Authentication/authorization is enforced at API Gateway; rule engine docs assume trusted ingress.
 
 ## Core Index Files
 

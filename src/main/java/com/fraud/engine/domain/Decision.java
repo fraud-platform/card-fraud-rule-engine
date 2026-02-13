@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,10 +55,10 @@ public class Decision {
     private String rulesetId;
 
     @JsonProperty("matched_rules")
-    private List<MatchedRule> matchedRules = new ArrayList<>();
+    private List<MatchedRule> matchedRules = Collections.emptyList();
 
     @JsonProperty("velocity_results")
-    private Map<String, VelocityResult> velocityResults = new HashMap<>();
+    private Map<String, VelocityResult> velocityResults = Collections.emptyMap();
 
     @JsonProperty("timestamp")
     private Instant timestamp;
@@ -176,10 +177,15 @@ public class Decision {
     }
 
     public void setMatchedRules(List<MatchedRule> matchedRules) {
-        this.matchedRules = matchedRules;
+        this.matchedRules = matchedRules != null ? matchedRules : Collections.emptyList();
     }
 
     public void addMatchedRule(MatchedRule matchedRule) {
+        if (!(this.matchedRules instanceof ArrayList)) {
+            this.matchedRules = this.matchedRules.isEmpty()
+                    ? new ArrayList<>(2)
+                    : new ArrayList<>(this.matchedRules);
+        }
         this.matchedRules.add(matchedRule);
     }
 
@@ -188,10 +194,15 @@ public class Decision {
     }
 
     public void setVelocityResults(Map<String, VelocityResult> velocityResults) {
-        this.velocityResults = velocityResults;
+        this.velocityResults = velocityResults != null ? velocityResults : Collections.emptyMap();
     }
 
     public void addVelocityResult(String key, VelocityResult result) {
+        if (!(this.velocityResults instanceof HashMap)) {
+            this.velocityResults = this.velocityResults.isEmpty()
+                    ? new HashMap<>(2)
+                    : new HashMap<>(this.velocityResults);
+        }
         this.velocityResults.put(key, result);
     }
 

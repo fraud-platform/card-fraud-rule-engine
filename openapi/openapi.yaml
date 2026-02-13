@@ -13,26 +13,12 @@ info:
     - **Simulation**: Ad-hoc ruleset testing with inline YAML
 
     ## Authentication
-    All endpoints except `/health` require JWT Bearer token with appropriate scopes.
-
-    Get a token from Auth0:
-    ```bash
-    curl -X POST https://${AUTH0_DOMAIN}/oauth/token \
-      -H "content-type: application/json" \
-      -d '{
-        "client_id":"${AUTH0_CLIENT_ID}",
-        "client_secret":"${AUTH0_CLIENT_SECRET}",
-        "audience":"https://fraud-rule-engine-api",
-        "grant_type":"client_credentials"
-      }'
-    ```
+    Authentication and authorization are handled at the API Gateway layer.
+    The rule engine trusts gateway-forwarded traffic and does not validate tokens directly.
 
 servers:
   - url: http://localhost:8081
     description: Local development
-
-security:
-  - bearerAuth: []
 
 paths:
   /v1/evaluate/auth:
@@ -76,18 +62,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized - missing or invalid token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: Forbidden - missing execute:rules scope
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
   /v1/evaluate/monitoring:
     post:
@@ -127,18 +101,6 @@ paths:
                 $ref: '#/components/schemas/Decision'
         "400":
           description: Invalid request (decision must be APPROVE or DECLINE)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: Forbidden
           content:
             application/json:
               schema:
@@ -373,13 +335,6 @@ paths:
                 $ref: '#/components/schemas/MetricsResponse'
 
 components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: JWT token from Auth0 with required scopes
-
   schemas:
     TransactionContext:
       type: object

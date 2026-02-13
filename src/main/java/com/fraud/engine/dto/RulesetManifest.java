@@ -16,6 +16,12 @@ public class RulesetManifest {
     @JsonProperty("environment")
     private String environment;
 
+    @JsonProperty("region")
+    private String region;
+
+    @JsonProperty("country")
+    private String country;
+
     @JsonProperty("ruleset_key")
     private String rulesetKey;
 
@@ -40,6 +46,14 @@ public class RulesetManifest {
 
     public String getEnvironment() {
         return environment;
+    }
+
+    public String getRegion() {
+        return region;
+    }
+
+    public String getCountry() {
+        return country;
     }
 
     public String getRulesetKey() {

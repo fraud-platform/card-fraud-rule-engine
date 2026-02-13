@@ -6,7 +6,7 @@ import com.fraud.engine.domain.TransactionContext;
 import com.fraud.engine.engine.RuleEvaluator;
 import com.fraud.engine.resource.dto.*;
 import com.fraud.engine.ruleset.RulesetLoader;
-import com.fraud.engine.security.ScopeValidator;
+import com.fraud.engine.util.EngineMetrics;
 import com.fraud.engine.service.FieldRegistryService;
 import com.fraud.engine.simulation.SimulationService;
 import com.fraud.engine.simulation.SimulationService.SimulationResult;
@@ -16,21 +16,16 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.enums.SecuritySchemeType;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
-import org.eclipse.microprofile.openapi.annotations.security.SecurityRequirement;
-import org.eclipse.microprofile.openapi.annotations.security.SecurityScheme;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import java.lang.management.ManagementFactory;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -50,12 +45,6 @@ import java.util.Optional;
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Management", description = "Management and replay endpoints")
-@SecurityScheme(
-        securitySchemeName = "bearerAuth",
-        type = SecuritySchemeType.HTTP,
-        scheme = "bearer",
-        bearerFormat = "JWT"
-)
 public class ManagementResource {
 
     private static final Logger LOG = Logger.getLogger(ManagementResource.class);
@@ -79,10 +68,7 @@ public class ManagementResource {
     S3StartupValidator s3StartupValidator;
 
     @Inject
-    JsonWebToken jwt;
-
-    @Inject
-    ScopeValidator scopeValidator;
+    EngineMetrics engineMetrics;
 
     /**
      * Replays a transaction against the ruleset without side effects.
@@ -100,15 +86,12 @@ public class ManagementResource {
      */
     @POST
     @Path("/replay")
-    @SecurityRequirement(name = "bearerAuth")
     @Operation(
             summary = "Replay transaction evaluation",
             description = "Evaluates a transaction without side effects (no Kafka publish, no velocity update)"
     )
     @APIResponses({
-            @APIResponse(responseCode = "200", description = "Replay successful"),
-            @APIResponse(responseCode = "401", description = "Unauthorized"),
-            @APIResponse(responseCode = "403", description = "Forbidden - missing scope")
+            @APIResponse(responseCode = "200", description = "Replay successful")
     })
     public Response replayTransaction(
             @RequestBody(
@@ -117,9 +100,6 @@ public class ManagementResource {
                     content = @Content(schema = @Schema(implementation = TransactionContext.class))
             )
             ReplayRequest request) {
-
-        // Validate M2M token and scope
-        scopeValidator.requireM2MWithScope(jwt, "replay:transactions");
 
         LOG.infof("Replay request: transactionId=%s, rulesetKey=%s, version=%d",
                 request.transactionId, request.rulesetKey, request.version);
@@ -131,47 +111,23 @@ public class ManagementResource {
             // Load specified ruleset version (for replay against specific version)
             Decision decision;
             Integer version;
-
-            if (rulesetLoader.isYamlFallbackEnabled()) {
-                Optional<com.fraud.engine.domain.Ruleset> rulesetOpt;
-                if (request.version != null && request.version > 0) {
-                    rulesetOpt = rulesetLoader.loadRuleset(rulesetKey, request.version);
-                } else {
-                    rulesetOpt = rulesetLoader.loadLatestRuleset(rulesetKey);
-                }
-
-                if (rulesetOpt.isEmpty()) {
-                    LOG.warnf("Ruleset not found for replay: %s", rulesetKey);
-                    return Response.status(Response.Status.NOT_FOUND)
-                            .entity(new ErrorResponse("RULESET_NOT_FOUND", "Ruleset not found: " + rulesetKey))
-                            .build();
-                }
-
-                com.fraud.engine.domain.Ruleset ruleset = rulesetOpt.get();
-                version = ruleset.getVersion();
-                // Evaluate with replay mode (no velocity increment, no Kafka)
-                decision = ruleEvaluator.evaluate(request.transaction, ruleset, true);
-                decision.setRulesetKey(rulesetKey);
-                decision.setRulesetVersion(version);
+            Optional<Ruleset> compiledOpt;
+            if (request.version != null && request.version > 0) {
+                compiledOpt = rulesetLoader.loadCompiledRuleset(rulesetKey, request.version);
             } else {
-                Optional<Ruleset> compiledOpt;
-                if (request.version != null && request.version > 0) {
-                    compiledOpt = rulesetLoader.loadCompiledRuleset(rulesetKey, request.version);
-                } else {
-                    compiledOpt = rulesetLoader.loadLatestCompiledRuleset(rulesetKey);
-                }
-
-                if (compiledOpt.isEmpty()) {
-                    LOG.warnf("Compiled ruleset not found for replay: %s", rulesetKey);
-                    return Response.status(Response.Status.NOT_FOUND)
-                            .entity(new ErrorResponse("RULESET_NOT_FOUND", "Ruleset not found: " + rulesetKey))
-                            .build();
-                }
-
-                Ruleset compiledRuleset = compiledOpt.get();
-                version = compiledRuleset.getVersion();
-                decision = ruleEvaluator.evaluate(request.transaction, compiledRuleset, true);
+                compiledOpt = rulesetLoader.loadLatestCompiledRuleset(rulesetKey);
             }
+
+            if (compiledOpt.isEmpty()) {
+                LOG.warnf("Compiled ruleset not found for replay: %s", rulesetKey);
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(new ErrorResponse("RULESET_NOT_FOUND", "Ruleset not found: " + rulesetKey))
+                        .build();
+            }
+
+            Ruleset compiledRuleset = compiledOpt.get();
+            version = compiledRuleset.getVersion();
+            decision = ruleEvaluator.evaluate(request.transaction, compiledRuleset, true);
 
             LOG.infof("Replay complete: transactionId=%s, decision=%s",
                     request.transactionId, decision.getDecision());
@@ -192,13 +148,9 @@ public class ManagementResource {
      */
     @POST
     @Path("/replay/batch")
-    @SecurityRequirement(name = "bearerAuth")
     @Operation(summary = "Batch replay", description = "Replay multiple transactions")
     @APIResponse(responseCode = "200", description = "Batch replay complete")
     public Response replayBatch(BatchReplayRequest request) {
-        // Validate M2M token and scope
-        scopeValidator.requireM2MWithScope(jwt, "replay:transactions");
-
         LOG.infof("Batch replay request: %d transactions", request.transactions.size());
 
         BatchReplayResponse response = new BatchReplayResponse();
@@ -209,27 +161,14 @@ public class ManagementResource {
                 String rulesetKey = request.rulesetKey != null ? request.rulesetKey : "CARD_AUTH";
 
                 Decision decision = null;
-                if (rulesetLoader.isYamlFallbackEnabled()) {
-                    Optional<com.fraud.engine.domain.Ruleset> rulesetOpt;
-                    if (request.version != null && request.version > 0) {
-                        rulesetOpt = rulesetLoader.loadRuleset(rulesetKey, request.version);
-                    } else {
-                        rulesetOpt = rulesetLoader.loadLatestRuleset(rulesetKey);
-                    }
-
-                    if (rulesetOpt.isPresent()) {
-                        decision = ruleEvaluator.evaluate(transaction, rulesetOpt.get(), true);
-                    }
+                Optional<Ruleset> compiledOpt;
+                if (request.version != null && request.version > 0) {
+                    compiledOpt = rulesetLoader.loadCompiledRuleset(rulesetKey, request.version);
                 } else {
-                    Optional<Ruleset> compiledOpt;
-                    if (request.version != null && request.version > 0) {
-                        compiledOpt = rulesetLoader.loadCompiledRuleset(rulesetKey, request.version);
-                    } else {
-                        compiledOpt = rulesetLoader.loadLatestCompiledRuleset(rulesetKey);
-                    }
-                    if (compiledOpt.isPresent()) {
-                        decision = ruleEvaluator.evaluate(transaction, compiledOpt.get(), true);
-                    }
+                    compiledOpt = rulesetLoader.loadLatestCompiledRuleset(rulesetKey);
+                }
+                if (compiledOpt.isPresent()) {
+                    decision = ruleEvaluator.evaluate(transaction, compiledOpt.get(), true);
                 }
 
                 if (decision != null) {
@@ -257,15 +196,10 @@ public class ManagementResource {
      */
     @POST
     @Path("/simulate")
-    @SecurityRequirement(name = "bearerAuth")
     @Operation(summary = "Simulate with custom ruleset", description = "Test with ad-hoc ruleset content")
     @APIResponse(responseCode = "200", description = "Simulation complete")
     @APIResponse(responseCode = "400", description = "Invalid ruleset YAML")
-    @APIResponse(responseCode = "403", description = "Missing required scope")
     public Response simulate(SimulationRequest request) {
-        // Validate M2M token and scope
-        scopeValidator.requireM2MWithScope(jwt, "replay:transactions");
-
         try {
             SimulationService.SimulationResult result = simulationService.simulate(
                     request.getTransaction(),
@@ -312,13 +246,9 @@ public class ManagementResource {
      */
     @GET
     @Path("/metrics")
-    @SecurityRequirement(name = "bearerAuth")
     @Operation(summary = "Get engine metrics", description = "Performance and operational metrics")
     @APIResponse(responseCode = "200", description = "Metrics retrieved")
     public Response getMetrics() {
-        // Validate M2M token and scope
-        scopeValidator.requireM2MWithScope(jwt, "read:metrics");
-
         MetricsResponse metrics = new MetricsResponse();
         metrics.rulesetCacheSize = rulesetLoader.getCacheSize();
         metrics.storageAccessible = rulesetLoader.isStorageAccessible();
@@ -335,6 +265,9 @@ public class ManagementResource {
         metrics.fieldRegistryS3Available = s3StartupValidator.isFieldRegistryAvailable();
         metrics.rulesetS3Available = s3StartupValidator.isRulesetAvailable();
         metrics.startupHealthy = s3StartupValidator.isStartupHealthy();
+
+        // Engine counters
+        metrics.engineCounters = engineMetrics.snapshot();
 
         return Response.ok(metrics).build();
     }

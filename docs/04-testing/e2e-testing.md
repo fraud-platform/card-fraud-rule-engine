@@ -18,7 +18,6 @@ The Card Fraud Rule Engine uses the centralized **card-fraud-e2e-load-testing** 
 |----------|-------------|
 | **Locust-based** | Industry-standard load testing framework |
 | **Multiple Scenarios** | Smoke, Baseline, Stress, Soak, Spike |
-| **Authentication Modes** | None, Auth0 JWT, Local JWT |
 | **Test Data Generation** | Transactions, Users, Rules |
 | **Reporting** | HTML reports, Grafana dashboards |
 | **CI/CD Integration** | GitHub Actions workflow templates |
@@ -53,9 +52,6 @@ uv run lt-web
 uv run lt-rule-engine --users=1000 --spawn-rate=100 --run-time=5m
 
 # With authentication modes
-uv run lt-rule-engine --users=1000 --auth-mode none        # No JWT
-uv run lt-rule-engine --users=1000 --auth-mode auth0       # Auth0 JWT
-uv run lt-rule-engine --users=1000 --auth-mode local       # Local JWT
 ```
 
 ---
@@ -124,11 +120,6 @@ uv run lt-rule-engine --users=5000 --spawn-rate=1000 --run-time=5m --scenario=sp
 # Required - Rule Engine URL
 export RULE_ENGINE_URL="http://localhost:8081"
 
-# Optional - Authentication (only needed for --auth-mode auth0)
-export AUTH0_DOMAIN="your-domain.auth0.com"
-export AUTH0_AUDIENCE="your-api-audience"
-export AUTH0_CLIENT_ID="your-client-id"
-export AUTH0_CLIENT_SECRET="your-client-secret"
 
 # Optional - MinIO for artifact publishing
 export MINIO_ENDPOINT="localhost:9000"
@@ -170,24 +161,16 @@ RuleEngineConfig:
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| `none` | No JWT tokens sent | Local testing with JWT bypass enabled |
-| `auth0` | Real Auth0 JWT tokens | Production-like testing |
-| `local` | Locally signed JWT tokens | Development without Auth0 |
 
-### For Local Testing with JWT Bypass
 
-1. **Enable JWT bypass in the rule engine:**
    ```bash
    APP_ENV=local
-   SECURITY_SKIP_JWT_VALIDATION=true
    ```
 
 2. **Run load test without authentication:**
    ```bash
-   uv run lt-rule-engine --users=1000 --auth-mode none
    ```
 
-**Security:** JWT bypass is ONLY allowed in `local` environment. The service will fail to start if `SECURITY_SKIP_JWT_VALIDATION=true` is set in `test` or `prod` environments.
 
 ---
 
@@ -294,14 +277,11 @@ jobs:
 2. Check `RULE_ENGINE_URL` is correct
 3. Verify port: `curl http://localhost:8081/v1/evaluate/health`
 
-### Auth0 Token Expired
 
 **Error:** `401 Unauthorized`
 
 **Solution:**
-1. Check `AUTH0_CLIENT_SECRET` is correct
 2. Verify token hasn't expired
-3. Use `--auth-mode none` for local testing
 
 ### High Latency
 

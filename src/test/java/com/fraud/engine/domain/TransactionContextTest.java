@@ -145,6 +145,16 @@ class TransactionContextTest {
     }
 
     @Test
+    void testCustomFieldsLazyAllocation() {
+        TransactionContext txn = new TransactionContext();
+        assertThat(txn.getCustomFieldsIfPresent()).isNull();
+
+        txn.addCustomField("key", "value");
+
+        assertThat(txn.getCustomFieldsIfPresent()).containsEntry("key", "value");
+    }
+
+    @Test
     void testAddressFields() {
         TransactionContext.Address address = new TransactionContext.Address();
         address.setStreet1("123 Main St");
@@ -179,6 +189,16 @@ class TransactionContextTest {
         txn.setTimestamp(now);
 
         assertThat(txn.getTimestamp()).isEqualTo(now);
+    }
+
+    @Test
+    void testTimestampRawParsingIsLazy() {
+        TransactionContext txn = new TransactionContext();
+        String rawTimestamp = "2026-02-11T00:00:00Z";
+        txn.setTimestampRaw(rawTimestamp);
+
+        assertThat(txn.getField(TransactionContext.F_TIMESTAMP)).isEqualTo(rawTimestamp);
+        assertThat(txn.getTimestamp()).isEqualTo(Instant.parse(rawTimestamp));
     }
 
     @Test

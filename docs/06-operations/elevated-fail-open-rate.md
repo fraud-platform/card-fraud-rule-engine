@@ -108,7 +108,6 @@ curl http://localhost:8081/v1/manage/rulesets/status
 
 # Force reload
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/hotswap \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey": "CARD_AUTH", "version": "latest"}'
 ```
@@ -196,7 +195,6 @@ docker stop card-fraud-rule-engine-redis
 # Send transactions
 for i in {1..20}; do
   curl -X POST http://localhost:8081/v1/evaluate/auth \
-    -H "Authorization: Bearer $JWT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"transaction_id":"test-'$i'","card_hash":"test-card-1","amount":50.00,"currency":"USD"}'
 done
@@ -210,7 +208,6 @@ curl -s http://localhost:8081/q/metrics | grep "decision_engine_mode.*FAIL_OPEN"
 ```bash
 # Force ruleset unload (internal API)
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/hotswap \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey":"CARD_AUTH","version":"nonexistent"}'
 
@@ -273,7 +270,6 @@ curl -s http://localhost:8081/q/metrics | grep "circuit_breaker_state"
 ```bash
 # Send test transactions
 curl -X POST http://localhost:8081/v1/evaluate/auth \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"transaction_id":"verify-fix-001","card_hash":"verify-card","amount":99999.00,"currency":"USD","merchant_category_code":"7995"}'
 

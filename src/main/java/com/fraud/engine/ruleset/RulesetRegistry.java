@@ -97,6 +97,25 @@ public class RulesetRegistry {
     }
 
     /**
+     * Gets a ruleset with country-specific lookup and global fallback (ADR-0016).
+     * <p>
+     * Tries country-specific first, then falls back to global namespace.
+     *
+     * @param country the country code from the transaction
+     * @param rulesetKey the ruleset key
+     * @return the compiled ruleset, or null if not found in either namespace
+     */
+    public Ruleset getRulesetWithFallback(String country, String rulesetKey) {
+        if (country != null && !country.isBlank() && !"global".equalsIgnoreCase(country)) {
+            Ruleset countrySpecific = getRuleset(country.toUpperCase(), rulesetKey);
+            if (countrySpecific != null) {
+                return countrySpecific;
+            }
+        }
+        return getRuleset("global", rulesetKey);
+    }
+
+    /**
      * Gets the latest version of a ruleset from the specified country.
      * Checks S3/MinIO for the latest version and loads it if not cached.
      * <p>
@@ -116,8 +135,8 @@ public class RulesetRegistry {
             return cached;
         }
 
-        // Load from S3
-        return loader.loadLatestRuleset(rulesetKey)
+        // Load from S3 with country-partitioned path support
+        return loader.loadLatestCompiledRuleset(country, rulesetKey)
                 .map(compiled -> {
                     register(country, compiled);
                     return compiled;
@@ -180,7 +199,7 @@ public class RulesetRegistry {
      */
     public boolean loadAndRegister(String country, String rulesetKey, int version) {
         try {
-            Ruleset compiled = loader.loadRuleset(rulesetKey, version).orElse(null);
+            Ruleset compiled = loader.loadCompiledRuleset(rulesetKey, version).orElse(null);
             if (compiled == null) {
                 LOG.errorf("Failed to load ruleset: %s v%d", rulesetKey, version);
                 return false;
@@ -254,7 +273,7 @@ public class RulesetRegistry {
         // Step 1: Load new ruleset (don't modify registry yet)
         Ruleset newRuleset;
         try {
-            newRuleset = loader.loadRuleset(rulesetKey, newVersion).orElse(null);
+            newRuleset = loader.loadCompiledRuleset(rulesetKey, newVersion).orElse(null);
 
             if (newRuleset == null) {
                 LOG.errorf("Hot swap failed: could not load %s v%d", rulesetKey, newVersion);
@@ -414,7 +433,7 @@ public class RulesetRegistry {
                     int currentVersion = entry.getValue().getVersion();
 
                     // Check if there's a newer version
-                    loader.loadLatestRuleset(key).ifPresent(latest -> {
+                    loader.loadLatestCompiledRuleset(key).ifPresent(latest -> {
                         if (latest.getVersion() > currentVersion) {
                             LOG.infof("New version available: %s v%d (current: v%d)",
                                     key, latest.getVersion(), currentVersion);

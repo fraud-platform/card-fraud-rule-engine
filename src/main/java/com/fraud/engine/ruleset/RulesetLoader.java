@@ -2,7 +2,9 @@ package com.fraud.engine.ruleset;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fraud.engine.dto.RulesetManifest;
 import com.fraud.engine.domain.Condition;
 import com.fraud.engine.domain.CompiledCondition;
@@ -76,6 +78,10 @@ public class RulesetLoader {
     @PostConstruct
     void init() {
         try {
+            // Configure Jackson ObjectMapper to handle Java 8 date/time types
+            jsonMapper.registerModule(new JavaTimeModule());
+            jsonMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
             LOG.infof("Initializing S3 client for MinIO: %s", endpointUrl);
 
             s3Client = S3Client.builder()
@@ -94,7 +100,65 @@ public class RulesetLoader {
     }
 
     /**
-     * Loads the runtime manifest.json for a ruleset key.
+     * Loads the runtime manifest.json for a ruleset key with country-partitioned path support.
+     * <p>
+     * Tries country-partitioned path first: rulesets/{env}/{country}/{rulesetKey}/manifest.json
+     * Falls back to legacy path if not found: rulesets/{env}/{rulesetKey}/manifest.json
+     *
+     * @param country the country code (e.g., "US")
+     * @param rulesetKey the ruleset key (e.g., "CARD_AUTH")
+     * @return manifest or null if not found
+     */
+    public RulesetManifest loadManifest(String country, String rulesetKey) {
+        // Try country-partitioned path first
+        try {
+            String objectKey = buildRulesetPrefix(country, rulesetKey) + "manifest.json";
+
+            GetObjectRequest request = GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .build();
+
+            try (InputStream inputStream = s3Client.getObject(request)) {
+                return jsonMapper.readValue(inputStream, RulesetManifest.class);
+            }
+
+        } catch (NoSuchKeyException e) {
+            LOG.debugf("Country-partitioned manifest not found, trying fallback: country=%s, key=%s", country, rulesetKey);
+        } catch (Exception e) {
+            LOG.warnf("Error loading country-partitioned manifest for %s/%s: %s", country, rulesetKey, e.getMessage());
+        }
+
+        // Fallback to legacy path (no country in path)
+        try {
+            String objectKey = buildRulesetPrefix(rulesetKey) + "manifest.json";
+
+            GetObjectRequest request = GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .build();
+
+            try (InputStream inputStream = s3Client.getObject(request)) {
+                RulesetManifest manifest = jsonMapper.readValue(inputStream, RulesetManifest.class);
+                LOG.warnf("Using legacy manifest path for %s (migration to country-partitioned paths recommended)", rulesetKey);
+                return manifest;
+            }
+
+        } catch (NoSuchKeyException e) {
+            LOG.debugf("Ruleset manifest not found (tried both country and legacy paths): country=%s, key=%s", country, rulesetKey);
+            return null;
+        } catch (Exception e) {
+            LOG.warnf("Failed to load ruleset manifest for %s: %s", rulesetKey, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Loads the runtime manifest.json for a ruleset key (legacy method for backward compatibility).
+     * <p>
+     * Uses legacy path: rulesets/{env}/{rulesetKey}/manifest.json
+     * <p>
+     * For new code, prefer {@link #loadManifest(String, String)} with explicit country parameter.
      *
      * @param rulesetKey the ruleset key (e.g., "CARD_AUTH")
      * @return manifest or null if not found
@@ -122,7 +186,49 @@ public class RulesetLoader {
     }
 
     /**
-     * Loads the latest compiled ruleset via manifest.json.
+     * Loads the latest compiled ruleset via manifest.json with country-partitioned path support.
+     * <p>
+     * Tries country-partitioned paths first, falls back to legacy paths if not found.
+     *
+     * @param country the country code
+     * @param rulesetKey the ruleset key
+     * @return compiled ruleset or empty if not found
+     */
+    public Optional<Ruleset> loadLatestCompiledRuleset(String country, String rulesetKey) {
+        RulesetManifest manifest = loadManifest(country, rulesetKey);
+        if (manifest == null || manifest.getArtifactUri() == null) {
+            LOG.warnf("Ruleset manifest missing or invalid for country=%s, key=%s", country, rulesetKey);
+            return Optional.empty();
+        }
+
+        try {
+            byte[] artifact = loadArtifactBytes(manifest.getArtifactUri());
+            if (artifact == null || artifact.length == 0) {
+                LOG.warnf("Ruleset artifact is empty for country=%s, key=%s", country, rulesetKey);
+                return Optional.empty();
+            }
+
+            if (!verifyChecksum(artifact, manifest.getChecksum())) {
+                LOG.errorf("Checksum mismatch for ruleset country=%s, key=%s (version %s)",
+                        country, rulesetKey, manifest.getRulesetVersion());
+                return Optional.empty();
+            }
+
+            Ruleset ruleset = parseRuleset(artifact, rulesetKey, manifest.getRulesetVersion());
+            return Optional.of(ruleset);
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to load compiled ruleset for country=%s, key=%s", country, rulesetKey);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Loads the latest compiled ruleset via manifest.json (legacy method for backward compatibility).
+     * <p>
+     * Uses legacy path: rulesets/{env}/{rulesetKey}/
+     * <p>
+     * For new code, prefer {@link #loadLatestCompiledRuleset(String, String)} with explicit country parameter.
      *
      * @param rulesetKey the ruleset key
      * @return compiled ruleset or empty if not found
@@ -377,6 +483,11 @@ public class RulesetLoader {
     }
 
     // ========== Compiled Ruleset JSON Parsing ==========
+
+    private String buildRulesetPrefix(String country, String rulesetKey) {
+        String prefix = pathPrefix.endsWith("/") ? pathPrefix : pathPrefix + "/";
+        return prefix + rulesetEnvironment + "/" + country + "/" + rulesetKey + "/";
+    }
 
     private String buildRulesetPrefix(String rulesetKey) {
         String prefix = pathPrefix.endsWith("/") ? pathPrefix : pathPrefix + "/";

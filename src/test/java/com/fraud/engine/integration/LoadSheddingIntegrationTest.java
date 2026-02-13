@@ -1,12 +1,8 @@
 package com.fraud.engine.integration;
 
-import com.fraud.engine.security.ScopeValidator;
-import com.fraud.engine.testutil.TestSecuritySetup;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
-import io.quarkus.test.InjectMock;
-import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.Test;
 
@@ -29,14 +25,8 @@ import static org.hamcrest.CoreMatchers.equalTo;
 @TestProfile(LoadSheddingIntegrationTest.LoadSheddingProfile.class)
 class LoadSheddingIntegrationTest {
 
-    @InjectMock
-    ScopeValidator scopeValidator;
-
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testMONITORINGLoadSheddingPreservesDecision() {
-        TestSecuritySetup.allowAllScopes(scopeValidator);
-
         Map<String, Object> payload = Map.of(
                 "transaction_id", "txn-load-shed-1",
                 "transaction_type", "PURCHASE",

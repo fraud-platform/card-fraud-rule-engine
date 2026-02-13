@@ -144,7 +144,6 @@ ls -la ruleset.yaml
 ```bash
 # Update manifest to point to working version
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/hotswap \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey": "CARD_AUTH", "version": "v2"}'
 ```
@@ -316,7 +315,6 @@ grep "Reload failed" /var/log/fraud-engine/app.log | awk '{print $1, $2}' | head
 ```bash
 # Test evaluation with ruleset
 curl -X POST http://localhost:8081/v1/evaluate/auth \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"transaction_id":"verify-loop-fixed","card_hash":"test","amount":100.00,"currency":"USD"}'
 

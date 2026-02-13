@@ -2,6 +2,7 @@ package com.fraud.engine.domain;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -163,7 +164,10 @@ public class TransactionContext {
     private Address shippingAddress;
 
     @JsonProperty("timestamp")
-    private Instant timestamp;
+    private String timestampRaw;
+
+    // Lazily parsed from timestampRaw only when getTimestamp() is called.
+    private transient Instant timestamp;
 
     @JsonProperty("decision")
     private String decision;
@@ -179,7 +183,7 @@ public class TransactionContext {
     private String cardLogo;
 
     @JsonProperty("custom_fields")
-    private Map<String, Object> customFields = new HashMap<>();
+    private Map<String, Object> customFields;
 
     // ========== Fast Access Array ==========
     // Fixed-size array for O(1) field access without HashMap overhead.
@@ -440,13 +444,30 @@ public class TransactionContext {
         }
     }
 
+    @JsonIgnore
     public Instant getTimestamp() {
+        if (timestamp == null && timestampRaw != null) {
+            timestamp = Instant.parse(timestampRaw);
+        }
         return timestamp;
     }
 
     public void setTimestamp(Instant timestamp) {
         this.timestamp = timestamp;
-        this.fields[F_TIMESTAMP - 1] = timestamp != null ? timestamp.toString() : null;
+        this.timestampRaw = timestamp != null ? timestamp.toString() : null;
+        this.fields[F_TIMESTAMP - 1] = this.timestampRaw;
+    }
+
+    @JsonProperty("timestamp")
+    public String getTimestampRaw() {
+        return timestampRaw;
+    }
+
+    @JsonProperty("timestamp")
+    public void setTimestampRaw(String timestampRaw) {
+        this.timestampRaw = timestampRaw;
+        this.timestamp = null;
+        this.fields[F_TIMESTAMP - 1] = timestampRaw;
     }
 
     public String getDecision() {
@@ -458,6 +479,17 @@ public class TransactionContext {
     }
 
     public Map<String, Object> getCustomFields() {
+        if (customFields == null) {
+            customFields = new HashMap<>();
+        }
+        return customFields;
+    }
+
+    /**
+     * Returns custom fields without forcing allocation.
+     * Intended for hot paths that only need to check whether custom fields exist.
+     */
+    public Map<String, Object> getCustomFieldsIfPresent() {
         return customFields;
     }
 
@@ -466,7 +498,7 @@ public class TransactionContext {
     }
 
     public void addCustomField(String key, Object value) {
-        this.customFields.put(key, value);
+        getCustomFields().put(key, value);
     }
 
     // ========== Legacy Method (for backward compatibility) ==========

@@ -15,13 +15,13 @@ graph TB
     subgraph "Card Fraud Rule Engine"
         Engine[Decision Engine]
         API[REST API]
+        Worker[Monitoring Worker]
     end
 
     subgraph "Dependencies"
         Redis[(Redis 8.4)]
         Redpanda[(Redpanda)]
         MinIO[(MinIO)]
-        Auth0[(Auth0)]
         Doppler[(Doppler)]
     end
 
@@ -33,7 +33,6 @@ graph TB
     Engine -->|Velocity Check| Redis
     Engine -->|Decision Events| Redpanda
     Engine -->|Load Ruleset| MinIO
-    Engine -->|Validate JWT| Auth0
     Engine -->|Fetch Secrets| Doppler
 ```
 
@@ -52,7 +51,6 @@ graph TB
 | **Redis 8.4** | Velocity state, hot reload signals | TCP |
 | **Redpanda** | Kafka-compatible event streaming | Kafka Protocol |
 | **MinIO** | S3-compatible ruleset artifact storage | S3 API |
-| **Auth0** | JWT token validation | OAuth 2.0 |
 | **Doppler** | Secrets management | CLI |
 
 ## Container Diagram
@@ -70,14 +68,14 @@ graph TB
     end
 
     subgraph "External Services"
-        Auth0[Auth0 Cloud]
         Doppler[Doppler CLI]
     end
 
     Engine -->|Velocity| Redis
-    Engine -->|Events| Redpanda
+    Engine -->|Outbox (Streams)| Redis
+    Worker -->|Consume Outbox| Redis
+    Worker -->|Events| Redpanda
     Engine -->|Rulesets| MinIO
-    Engine -->|JWT| Auth0
     Doppler -->|Inject Secrets| Engine
 ```
 
@@ -159,7 +157,6 @@ graph TB
 
     VelocityService --> Redis
     DecisionPublisher --> Redpanda
-    ScopeValidator --> Auth0
 
     HotReloadCoordinator --> FieldRegistryWatcher
     FieldRegistryWatcher --> RulesetRegistry
@@ -180,9 +177,10 @@ graph TB
 | **FieldRegistryService** | Field name to ID mapping and lookup | `service/FieldRegistryService.java` |
 | **FieldRegistryLoader** | Load field registry from S3 with checksum validation | `loader/FieldRegistryLoader.java` |
 | **StartupRulesetLoader** | Bulk-load rulesets at application startup | `startup/StartupRulesetLoader.java` |
-| **DecisionPublisher** | Async Kafka event publishing to Redpanda | `kafka/DecisionPublisher.java` |
+| **DecisionPublisher** | Kafka event publishing to Redpanda (invoked by worker and direct MONITORING endpoint) | `kafka/DecisionPublisher.java` |
 | **DecisionEventCreate** | Kafka event schema (DecisionEventCreate) | `kafka/DecisionEventCreate.java` |
-| **ScopeValidator** | JWT scope-based M2M authorization | `security/ScopeValidator.java` |
+| **OutboxClient / OutboxFacade** | Redis Streams append/consume abstraction for auth-to-monitoring orchestration (ADR-0014) | `outbox/OutboxClient.java`, `outbox/OutboxFacade.java` |
+| **MonitoringOutboxWorker** | Consumes outbox, runs MONITORING_ALL_MATCH, then publishes AUTH and MONITORING events to Kafka (ADR-0014) | `outbox/MonitoringOutboxWorker.java` |
 | **LoadSheddingFilter** | HTTP filter for request rate limiting | `filter/LoadSheddingFilter.java` |
 | **FieldRegistryWatcher** | Watch for field registry changes | `watcher/FieldRegistryWatcher.java` |
 | **AlertLogger** | Structured alert logging for monitoring | `util/AlertLogger.java` |
@@ -302,8 +300,7 @@ sequenceDiagram
     participant Registry as RulesetRegistry
     participant Evaluator as RuleEvaluator
     participant Velocity as VelocityService
-    participant Redis as Redis
-    participant Kafka as DecisionPublisher
+    participant Redis as Redis Streams (outbox)
 
     Client->>API: POST /v1/evaluate/auth
     API->>Auth: validateM2MWithScope("execute:rules")
@@ -312,48 +309,41 @@ sequenceDiagram
     API->>Registry: getRuleset("CARD_AUTH")
     Registry-->>API: CompiledRuleset
 
-    API->>Evaluator: evaluate(transaction, ruleset)
-    Evaluator->>Velocity: checkVelocity(transaction, ruleset)
+    API->>Evaluator: evaluate(tx, AUTH_FIRST_MATCH)
+    Evaluator->>Velocity: checkVelocity(tx, ruleset)
     Velocity->>Redis: EVAL velocity_check_script
     Redis-->>Velocity: count, exceeded
     Velocity-->>Evaluator: VelocityResult
 
     Evaluator-->>API: Decision
-
-    API->>Kafka: publishDecision(decision)
-    Kafka-->>API: (async)
-
+    API->>Redis: XADD fraud:outbox * payload (tx + authDecision)
     API-->>Client: 200 OK {decision: "APPROVE"}
 ```
 
-### MONITORING Evaluation Flow
+### Monitoring Worker Flow
 
 ```mermaid
 sequenceDiagram
-    actor Client
-    participant API as EvaluationResource
-    participant Auth as ScopeValidator
+    participant Worker as Monitoring Worker
+    participant Redis as Redis Streams (outbox)
     participant Registry as RulesetRegistry
     participant Evaluator as RuleEvaluator
     participant Kafka as DecisionPublisher
 
-    Client->>API: POST /v1/evaluate/monitoring
-    API->>Auth: validateM2MWithScope("execute:rules")
-    Auth-->>API: OK
+    Worker->>Redis: XREADGROUP GROUP auth-monitoring-worker
+    Redis-->>Worker: Stream entry (tx + authDecision)
 
-    API->>API: normalizeDecision("APPROVE")
-    API->>Registry: getRuleset("CARD_MONITORING")
-    Registry-->>API: CompiledRuleset
+    Worker->>Registry: getRuleset("CARD_MONITORING")
+    Registry-->>Worker: CompiledRuleset
 
-    API->>Evaluator: evaluate(transaction, ruleset, MONITORING)
-    Note over Evaluator: All-matching semantics<br/>Analytics only
+    Worker->>Evaluator: evaluate(tx, MONITORING_ALL_MATCH)
+    Note over Evaluator: All-matching semantics
 
-    Evaluator-->>API: Decision
-
-    API->>Kafka: publishDecision(decision)
-    Kafka-->>API: (async)
-
-    API-->>Client: 200 OK {decision: "APPROVE"}
+    Evaluator-->>Worker: monitoringDecision
+    Worker->>Kafka: publish AUTH event
+    Worker->>Kafka: publish MONITORING event
+    Kafka-->>Worker: ack
+    Worker->>Redis: XACK entry
 ```
 
 ### Hot Swap Flow
@@ -417,8 +407,8 @@ sequenceDiagram
 
 | Flow | Description | Side Effects |
 |------|-------------|--------------|
-| **AUTH** | Real-time fraud evaluation (first-match, fail-open) | Redis velocity increment, Kafka event |
-| **MONITORING** | Analytics tracking (all-match) | Kafka event only |
+| **AUTH** | Real-time fraud evaluation (first-match, fail-open) | Redis velocity increment, Redis Streams outbox enqueue (ADR-0014) |
+| **MONITORING** | Analytics tracking (all-match, worker-driven) | Kafka event after MONITORING evaluation (worker) |
 | **Hot Swap** | Update ruleset version atomically | Redis pub/sub signal |
 | **Replay** | Test with no side effects | None |
 | **Simulation** | Ad-hoc ruleset testing | None |
@@ -486,7 +476,6 @@ The engine uses pre-compiled rulesets for optimal performance:
 | **Redis** | Quarkus Redis Client (Redis 8.4) |
 | **Kafka** | MicroProfile Reactive Messaging (Redpanda) |
 | **S3/MinIO** | AWS SDK for Java v2 |
-| **JWT** | SmallRye JWT |
 | **OpenAPI** | SmallRye OpenAPI |
 | **Testing** | JUnit 5, AssertJ, RestAssured, Mockito |
 | **Benchmarking** | JMH (Java Microbenchmark Harness) |
@@ -571,7 +560,6 @@ src/main/java/com/fraud/engine/
 │   ├── RulesetLoader.java               # Loads rulesets from S3
 │   └── RulesetRegistry.java             # In-memory cache with hot-swap
 ├── security/
-│   └── ScopeValidator.java              # JWT M2M + scope validation
 ├── service/
 │   ├── FieldRegistryService.java        # Field lookup service
 │   └── HotReloadCoordinator.java        # Coordinates hot-reload

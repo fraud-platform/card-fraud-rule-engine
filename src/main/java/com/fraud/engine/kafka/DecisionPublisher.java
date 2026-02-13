@@ -7,10 +7,11 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.reactive.messaging.Channel;
-import org.eclipse.microprofile.reactive.messaging.Emitter;
-import org.eclipse.microprofile.reactive.messaging.Message;
+import io.smallrye.reactive.messaging.MutinyEmitter;
+import io.smallrye.mutiny.Uni;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -32,7 +33,7 @@ public class DecisionPublisher {
 
     @Inject
     @Channel("decision-events")
-    Emitter<String> decisionEmitter;
+    MutinyEmitter<String> decisionEmitter;
 
     @Inject
     ObjectMapper objectMapper;
@@ -50,16 +51,21 @@ public class DecisionPublisher {
             DecisionEventCreate event = toDecisionEventCreate(decision);
             String payload = objectMapper.writeValueAsString(event);
 
-            LOG.debugf("Publishing decision event: decisionId=%s, transactionId=%s, decision=%s",
-                    decision.getDecisionId(),
-                    decision.getTransactionId(),
-                    decision.getDecision());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Publishing decision event: decisionId=%s, transactionId=%s, decision=%s",
+                        decision.getDecisionId(),
+                        decision.getTransactionId(),
+                        decision.getDecision());
+            }
 
-            Message<String> message = Message.of(payload);
-
-            decisionEmitter.send(message);
-
-            LOG.infof("Decision event published: %s", decision.getDecisionId());
+            decisionEmitter.send(payload)
+                    .subscribe()
+                    .with(v -> {
+                                if (LOG.isDebugEnabled()) {
+                                    LOG.debugf("Decision event published: %s", decision.getDecisionId());
+                                }
+                            },
+                            err -> LOG.errorf(err, "Failed to publish decision event: %s", decision.getDecisionId()));
 
         } catch (JsonProcessingException e) {
             LOG.errorf(e, "Failed to serialize decision event: %s", decision.getDecisionId());
@@ -74,20 +80,71 @@ public class DecisionPublisher {
      * @param decision the decision to publish
      */
     public void publishDecisionSync(Decision decision) {
+        publishDecisionAwait(decision);
+    }
+
+    /**
+     * Publishes a decision event and waits for acknowledgment.
+     */
+    public void publishDecisionAwait(Decision decision) {
         try {
             DecisionEventCreate event = toDecisionEventCreate(decision);
             String payload = objectMapper.writeValueAsString(event);
 
-            LOG.debugf("Publishing decision event (sync): %s", decision.getDecisionId());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Publishing decision event (await): %s", decision.getDecisionId());
+            }
 
-            decisionEmitter.send(payload);
+            Uni<Void> uni = decisionEmitter.send(payload);
+            uni.await().atMost(Duration.ofSeconds(5));
 
-            LOG.infof("Decision event published (sync): %s", decision.getDecisionId());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Decision event published (await): %s", decision.getDecisionId());
+            }
 
         } catch (JsonProcessingException e) {
             LOG.errorf(e, "Failed to serialize decision event: %s", decision.getDecisionId());
+            throw new EventPublishException("Failed to serialize decision event", e);
         } catch (Exception e) {
             LOG.errorf(e, "Failed to publish decision event: %s", decision.getDecisionId());
+            throw new EventPublishException("Failed to publish decision event", e);
+        }
+    }
+
+    /**
+     * Publishes a decision event to Kafka asynchronously (fire-and-forget).
+     * Does not block the caller - matches the AUTH outbox pattern for performance.
+     * Errors are logged but do not fail the request.
+     *
+     * @param decision the decision to publish
+     */
+    public void publishDecisionAsync(Decision decision) {
+        try {
+            DecisionEventCreate event = toDecisionEventCreate(decision);
+            String payload = objectMapper.writeValueAsString(event);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Publishing decision event (async): %s", decision.getDecisionId());
+            }
+
+            // Fire-and-forget: return immediately, don't wait for Kafka ack
+            decisionEmitter.send(payload)
+                .subscribe()
+                .with(
+                    v -> {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debugf("Decision event published (async): %s", decision.getDecisionId());
+                        }
+                    },
+                    err -> LOG.errorf(err, "Failed to publish decision event (async): %s", decision.getDecisionId())
+                );
+
+        } catch (JsonProcessingException e) {
+            LOG.errorf(e, "Failed to serialize decision event: %s", decision.getDecisionId());
+            // Don't throw - just log and continue (fail-open for performance)
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to publish decision event: %s", decision.getDecisionId());
+            // Don't throw - just log and continue
         }
     }
 

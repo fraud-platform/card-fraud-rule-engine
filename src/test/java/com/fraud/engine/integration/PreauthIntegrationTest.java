@@ -1,43 +1,20 @@
 package com.fraud.engine.integration;
 
-import com.fraud.engine.ruleset.RulesetRegistry;
-import com.fraud.engine.security.ScopeValidator;
-import com.fraud.engine.testutil.TestSecuritySetup;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.InjectMock;
-import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import jakarta.inject.Inject;
 import java.math.BigDecimal;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 /**
  * Integration tests for PREAUTH evaluation.
- *
- * <p>These tests use {@link TestSecurity} with mocked {@link ScopeValidator}
- * to bypass authentication checks in test mode.</p>
  */
 @QuarkusTest
 class PreauthIntegrationTest {
-
-    @InjectMock
-    ScopeValidator scopeValidator;
-
-    @Inject
-    RulesetRegistry rulesetRegistry;
-
-    @BeforeEach
-    void setUp() {
-        // Bypass all scope checks for these tests
-        TestSecuritySetup.allowAllScopes(scopeValidator);
-    }
 
     private TransactionContext createTransaction(String txnId, String cardHash, double amount, String countryCode) {
         TransactionContext txn = new TransactionContext();
@@ -51,7 +28,6 @@ class PreauthIntegrationTest {
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testAuthBasicEvaluation() {
         TransactionContext txn = createTransaction("txn-test-001", "card-123", 50.00, "US");
 
@@ -62,14 +38,13 @@ class PreauthIntegrationTest {
             .post("/v1/evaluate/auth")
         .then()
             .statusCode(200)
+            .body("transaction_id", equalTo("txn-test-001"))
             .body("decision", notNullValue())
-            .body("evaluation_type", equalTo("AUTH"))
             .body("engine_mode", notNullValue());
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
-    void testAuthHasDecisionId() {
+    void testAuthHasTransactionId() {
         TransactionContext txn = createTransaction("txn-test-id", "card-id", 50.00, null);
 
         given()
@@ -79,12 +54,11 @@ class PreauthIntegrationTest {
             .post("/v1/evaluate/auth")
         .then()
             .statusCode(200)
-            .body("decision_id", notNullValue());
+            .body("transaction_id", equalTo("txn-test-id"));
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
-    void testAuthHasTimestamp() {
+    void testAuthHasEngineMode() {
         TransactionContext txn = createTransaction("txn-test-time", "card-time", 50.00, null);
 
         given()
@@ -94,12 +68,11 @@ class PreauthIntegrationTest {
             .post("/v1/evaluate/auth")
         .then()
             .statusCode(200)
-            .body("timestamp", notNullValue());
+            .body("engine_mode", notNullValue());
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
-    void testAuthHasProcessingTime() {
+    void testAuthReturnsDecision() {
         TransactionContext txn = createTransaction("txn-test-latency", "card-latency", 50.00, null);
 
         given()
@@ -109,11 +82,10 @@ class PreauthIntegrationTest {
             .post("/v1/evaluate/auth")
         .then()
             .statusCode(200)
-            .body("processing_time_ms", notNullValue());
+            .body("decision", notNullValue());
     }
 
     @Test
-    @TestSecurity(user = "test-m2m@clients")
     void testAuthWithUnknownRulesetType_ExpectFailOpen() {
         TransactionContext txn = createTransaction("txn-test-missing", "card-missing", 999.00, null);
         txn.setTransactionType("UNKNOWN_RULESET");

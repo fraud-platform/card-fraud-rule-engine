@@ -4,7 +4,9 @@ Stateless Quarkus runtime for card fraud decisioning.
 
 - AUTH flow: first-match evaluation, fail-open default APPROVE
 - MONITORING flow: all-match analytics evaluation
+- AUTH path is hot: returns immediately after evaluation and enqueues for async durability; background workers persist to Redis Streams and publish AUTH decisions to Kafka with ack (MONITORING worker is optional and off by default)
 - Redis velocity checks, MinIO ruleset loading, Kafka decision publishing
+- Supported runtime ruleset keys are fixed to `CARD_AUTH` and `CARD_MONITORING` (no per-transaction-type ruleset namespaces)
 
 ## Quick Start
 
@@ -68,6 +70,8 @@ Verified on 2026-02-03:
 ## Security and Secrets
 
 Doppler is mandatory for runtime/test commands.
+Authentication and authorization are enforced at API Gateway.
+Rule engine no longer validates tokens in-process.
 
 Use:
 - `uv run doppler-local`
@@ -77,6 +81,8 @@ Do not use:
 - `mvn quarkus:dev`
 - `mvn test`
 - `.env` files in this repository
+
+Ruleset loading for runtime/replay uses compiled artifacts (`ruleset.json` via manifest) to mirror production behavior.
 
 ## Documentation
 

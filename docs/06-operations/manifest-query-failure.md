@@ -144,7 +144,6 @@ uv run publish-ruleset --ruleset CARD_AUTH --version v1
 ```bash
 # Force manifest refresh
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/load \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey": "CARD_AUTH"}'
 
@@ -203,7 +202,6 @@ docker stop card-fraud-rule-management-minio
 
 # Attempt ruleset reload
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/hotswap \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey":"CARD_AUTH","version":"latest"}'
 
@@ -220,7 +218,6 @@ export S3_SECRET_ACCESS_KEY=wrong-secret
 
 # Attempt ruleset operation
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/load \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey":"CARD_AUTH"}'
 
@@ -235,7 +232,6 @@ iptables -A INPUT -p tcp --dport 9000 -j DROP
 
 # Attempt ruleset operation
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/load \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey":"CARD_AUTH"}'
 
@@ -271,7 +267,6 @@ aws s3 cp s3://fraud-gov-artifacts/rulesets/CARD_AUTH/manifest.json - \
 
 # Test via API
 curl -X POST http://localhost:8081/v1/evaluate/rulesets/load \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"rulesetKey":"CARD_AUTH"}'
 # Expected: HTTP 200, ruleset loaded
@@ -298,7 +293,6 @@ curl -s http://localhost:8081/v1/manage/rulesets/status | jq
 
 # Test evaluation
 curl -X POST http://localhost:8081/v1/evaluate/auth \
-  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"transaction_id":"verify-manifest-001","card_hash":"test","amount":50.00,"currency":"USD"}'
 # Expected: decision made, not FAIL_OPEN due to manifest issues

@@ -144,7 +144,9 @@ public class VelocityService {
         Object dimValue = getDimensionValue(transaction, dimension);
         String dimensionValueStr = dimValue != null ? String.valueOf(dimValue) : null;
 
-        LOG.debugf("Velocity check: key=%s, window=%ds, threshold=%d", key, windowSeconds, threshold);
+        if (LOG.isDebugEnabled()) {
+            LOG.debugf("Velocity check: key=%s, window=%ds, threshold=%d", key, windowSeconds, threshold);
+        }
 
         try {
             long count = incrementAndGet(key, windowSeconds);
@@ -157,8 +159,10 @@ public class VelocityService {
                     windowSeconds
             );
 
-            LOG.debugv("Velocity result: count={0}, threshold={1}, exceeded={2}",
-                    count, threshold, result.isExceeded());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugv("Velocity result: count={0}, threshold={1}, exceeded={2}",
+                        count, threshold, result.isExceeded());
+            }
 
             return result;
 
@@ -354,7 +358,9 @@ public class VelocityService {
         try {
             ValueCommands<String, Long> commands = getValueCommands();
             commands.getdel(key);
-            LOG.debugf("Reset velocity key: %s", key);
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Reset velocity key: %s", key);
+            }
         } catch (Exception e) {
             LOG.warnf(e, "Failed to reset velocity key: %s", key);
         }
@@ -390,9 +396,10 @@ public class VelocityService {
             case "entry_mode" -> transaction.getEntryMode();
             case "card_present" -> transaction.getCardPresent();
             // Fallback for custom fields - rare case
-            default -> transaction.getCustomFields() != null
-                    ? transaction.getCustomFields().get(dimension)
-                    : null;
+            default -> {
+                Map<String, Object> customFields = transaction.getCustomFieldsIfPresent();
+                yield customFields != null ? customFields.get(dimension) : null;
+            }
         };
     }
 
@@ -498,7 +505,9 @@ public class VelocityService {
                     windowSeconds
             );
         } catch (Exception e) {
-            LOG.debugf("Failed to capture velocity for %s: %s", dimension, e.getMessage());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Failed to capture velocity for %s: %s", dimension, e.getMessage());
+            }
             return new Decision.VelocityResult(dimension, dimensionValue, 0, threshold, windowSeconds);
         }
     }

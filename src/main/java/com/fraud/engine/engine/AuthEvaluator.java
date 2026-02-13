@@ -27,17 +27,26 @@ public class AuthEvaluator {
     EvaluationConfig evaluationConfig;
 
     public void evaluate(EvaluationContext context) {
-        Map<String, Object> evalContext = context.transaction().toEvaluationContext();
-        List<Rule> rules = context.ruleset().getRulesByPriority();
+        // Keep AUTH context map lazy; compiled conditions don't require HashMap allocation.
+        Map<String, Object> evalContext = context.evalContext();
+        List<Rule> rules = context.getRulesToEvaluate();
 
-        LOG.debugf("AUTH evaluation: %d rules to evaluate", rules.size());
+        if (LOG.isDebugEnabled()) {
+            LOG.debugf("AUTH evaluation: %d rules to evaluate", rules.size());
+        }
 
         for (Rule rule : rules) {
             if (!rule.isEnabled()) {
                 continue;
             }
 
-            LOG.debugf("Evaluating rule: %s (%s)", rule.getId(), rule.getName());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Evaluating rule: %s (%s)", rule.getId(), rule.getName());
+            }
+
+            if (evalContext == null && (context.isDebugEnabled() || rule.getCompiledCondition() == null)) {
+                evalContext = context.transaction().toEvaluationContext();
+            }
 
             boolean ruleMatched = evaluateRule(rule, context.transaction(), evalContext);
             if (context.isDebugEnabled()) {
@@ -65,8 +74,10 @@ public class AuthEvaluator {
                 }
             }
 
-            LOG.infof("Rule matched: %s (%s) - Action: %s",
-                    rule.getId(), rule.getName(), rule.getAction());
+            if (LOG.isDebugEnabled()) {
+                LOG.debugf("Rule matched: %s (%s) - Action: %s",
+                        rule.getId(), rule.getName(), rule.getAction());
+            }
 
             Decision.MatchedRule matchedRule = createMatchedRule(rule);
             context.decision().addMatchedRule(matchedRule);
@@ -75,7 +86,9 @@ public class AuthEvaluator {
             return;
         }
 
-        LOG.debug("No rules matched, defaulting to APPROVE");
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("No rules matched, defaulting to APPROVE");
+        }
         context.decision().setDecision(Decision.DECISION_APPROVE);
     }
 
@@ -84,8 +97,9 @@ public class AuthEvaluator {
             return rule.getCompiledCondition().matches(transaction);
         }
         if (rule.getConditions() != null) {
+            Map<String, Object> resolvedContext = context != null ? context : transaction.toEvaluationContext();
             for (Condition condition : rule.getConditions()) {
-                if (!condition.evaluate(context)) {
+                if (!condition.evaluate(resolvedContext)) {
                     return false;
                 }
             }
@@ -100,7 +114,9 @@ public class AuthEvaluator {
         context.decision().addMatchedRule(matchedRule);
         context.decision().setDecision(
                 DecisionNormalizer.normalizeDecisionType(action, Decision.DECISION_APPROVE));
-        LOG.infof("Applied rule action: %s for rule %s", action, rule.getId());
+        if (LOG.isDebugEnabled()) {
+            LOG.debugf("Applied rule action: %s for rule %s", action, rule.getId());
+        }
     }
 
     private Decision.MatchedRule createMatchedRule(Rule rule) {
