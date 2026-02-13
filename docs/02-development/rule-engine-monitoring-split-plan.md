@@ -4,6 +4,46 @@ Date: 2026-02-13
 Status: Ready for separate execution session
 Audience: Engineering owners for `card-fraud-rule-engine-auth`, `card-fraud-rule-engine-monitoring`, and `card-fraud-platform`
 
+Runtime baseline for split:
+- Quarkus `3.31.2`
+- Java `25` (primary), Java `21` compatibility verified
+
+## 0) Preflight decisions (lock before first code cut)
+
+1. AUTH -> MONITORING handoff for approve flow
+- Decision: **Kafka (Redpanda)** is canonical transport.
+- Why: durable, replay-friendly, existing platform path, cleaner decoupling than Redis outbox for cross-service handoff.
+- Rule: AUTH service publishes `authDecision` event; MONITORING service consumes and processes.
+
+2. Direct decline flow contract
+- Decision: caller invokes MONITORING endpoint directly on decline path.
+- Rule: keep payload schema aligned with current monitoring contract and transaction-management expectations.
+
+3. Split acceptance baseline profile
+- Decision: use distributed Locust runs as acceptance source:
+  - users: `50`, `100`, `200`
+  - mode: `master + 3 workers`
+  - duration: `2m`
+  - source-of-truth: `rule-engine-distributed_stats.csv` aggregated row
+- Rule: reject runs with worker heartbeat/spawn mismatch warnings.
+
+4. Async durability toggles and comparability
+- Decision: pin async mode explicitly per run and record it in run notes/metadata.
+- Rule: no mixed/implicit defaults for acceptance comparisons.
+
+5. Platform routing ownership
+- Decision: explicit gateway path map in `card-fraud-platform`:
+  - `/v1/evaluate/auth` -> `card-fraud-rule-engine-auth`
+  - `/v1/evaluate/monitoring` -> `card-fraud-rule-engine-monitoring`
+- Rule: preserve existing local port conventions unless an explicit migration change is approved.
+
+6. Repo execution model for split
+- Decision: **create two repos from the same baseline snapshot**; do not rename current repo in place.
+- Rule:
+  - keep current `card-fraud-rule-engine` as historical baseline/reference until split is stable
+  - execute removals independently in each new repo
+  - tag all three repos with `split-baseline-2026-02-13`
+
 ## 1) Objective
 
 Split the current combined runtime into two deployable services:
@@ -234,6 +274,6 @@ Governance:
 
 - Language migration (Go/Rust)
 - Shared library extraction
-- Major framework upgrade (Quarkus version jump)
+- Framework upgrade planning (already completed in baseline to Quarkus `3.31.2`)
 
 Keep these as separate tracks to preserve causality of latency changes.

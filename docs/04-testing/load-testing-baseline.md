@@ -36,6 +36,60 @@ All runs used Locust distributed mode (`master + 2 workers`) from:
 Source-of-truth for metrics:
 - `.../rule-engine-distributed_stats.csv` aggregated row (manual distributed runs can produce incorrect `run-summary-*.json` values)
 
+## 2026-02-13 Quick Baseline After Quarkus 3.31.2 + Java 25
+
+- Topology:
+  - Single headless Locust process (non-distributed), local host -> local platform containers
+- Command:
+  - `uv run lt-run --service rule-engine --users=50 --spawn-rate=10 --run-time=2m --scenario baseline --headless`
+- Result:
+  - Requests: `80,682`
+  - Failures: `0`
+  - p50: `36 ms`
+  - p95: `64 ms`
+  - p99: `96 ms`
+  - Avg: `37.77 ms`
+  - RPS: `629.8`
+  - Locust warning: load-generator CPU crossed 90%
+- Artifacts:
+  - `C:/Users/kanna/github/card-fraud-e2e-load-testing/html-reports/run-summary-20260213-093622.json`
+  - `C:/Users/kanna/github/card-fraud-e2e-load-testing/html-reports/runs/lt-cd44d547fc9c/locust/rule-engine.html`
+- Comparison to prior best clean 50-user result (`2026-02-12`, OFF control rerun):
+  - Prior: `p50 21`, `p95 54`, `p99 89`, `rps 1066.61`
+  - Current: `p50 36`, `p95 64`, `p99 96`, `rps 629.8`
+  - Interpretation: this quick run did not improve latency; run-quality/topology differs (single-process Locust with CPU warning vs distributed clean reruns), so keep distributed reruns as acceptance source.
+
+## 2026-02-13 Distributed Apples-to-Apples Validation (master + 3 workers)
+
+- Topology:
+  - Manual Locust distributed mode (`master + 3 workers`), AUTH-only traffic mix
+- Source of truth:
+  - `rule-engine-distributed_stats.csv` aggregated row
+- Run ID:
+  - `lt-dist-java25-u50-w3-20260213-114023`
+- Result (aggregated CSV):
+  - Requests: `134,517`
+  - Failures: `0`
+  - p50: `26 ms`
+  - p95: `69 ms`
+  - p99: `110 ms`
+  - Avg: `30.89 ms`
+  - RPS: `1147.43`
+- Artifact:
+  - `C:/Users/kanna/github/card-fraud-e2e-load-testing/html-reports/runs/lt-dist-java25-u50-w3-20260213-114023/locust/rule-engine-distributed_stats.csv`
+
+Comparison to prior clean distributed 3-worker reference:
+- Reference run:
+  - `lt-dist-nextphase-async-off-u50-w3-20260212-212939`
+  - `p50 26`, `p95 71`, `p99 110`, `avg 31.21`, `rps 1093.03`, `131,676 req`, `0 failures`
+- Delta (new - reference):
+  - `p50 0 ms` (no change)
+  - `p95 -2 ms` (improved)
+  - `p99 0 ms` (no change)
+  - `avg -0.32 ms` (improved)
+  - `rps +54.40` (improved)
+  - `requests +2,841` (same duration)
+
 ### 2026-02-12 Matrix (clean reruns)
 
 | Run ID | Async durability mode | Target users | p50 (ms) | p95 (ms) | p99 (ms) | Avg (ms) | RPS | Requests | Failures | Notes |

@@ -32,6 +32,39 @@ This document captures the full, finalized plan and the two implementation PRs:
 - Verdict:
   - **SLA NOT MET** (`P50 < 10 ms`, `P95 < 20 ms` not achieved)
 
+### 2026-02-13 quick validation (Quarkus `3.31.2` + Java `25`)
+- Runtime:
+  - rule-engine rebuilt on Quarkus `3.31.2` with Java `25` on host
+- Baseline command:
+  - `uv run lt-run --service rule-engine --users=50 --spawn-rate=10 --run-time=2m --scenario baseline --headless`
+- Result:
+  - Requests: `80,682`
+  - Failures: `0`
+  - `p50 36 ms`, `p95 64 ms`, `p99 96 ms`, `avg 37.77 ms`, `rps 629.8`
+  - Locust warning: load-generator CPU crossed 90%
+  - Artifact: `C:/Users/kanna/github/card-fraud-e2e-load-testing/html-reports/run-summary-20260213-093622.json`
+- Comparison to current best clean 50-user control:
+  - Best clean reference: `lt-dist-nextphase-async-off-poston-u50-20260212-211755` (`p50 21`, `p95 54`, `p99 89`, `rps 1066.61`)
+  - Quick validation is slower and lower-throughput.
+- Interpretation:
+  - Framework/runtime upgrade is now in place and validated functionally.
+  - No immediate latency gain is confirmed from this single-process quick rerun.
+  - Continue using distributed clean reruns for acceptance decisions.
+
+### 2026-02-13 distributed apples-to-apples rerun (50 users, master + 3 workers)
+- Run ID:
+  - `lt-dist-java25-u50-w3-20260213-114023`
+- Source:
+  - `rule-engine-distributed_stats.csv` aggregated row
+- Result:
+  - `p50 26 ms`, `p95 69 ms`, `p99 110 ms`, `avg 30.89 ms`, `rps 1147.43`, `134,517 req`, `0 failures`
+- Artifact:
+  - `C:/Users/kanna/github/card-fraud-e2e-load-testing/html-reports/runs/lt-dist-java25-u50-w3-20260213-114023/locust/rule-engine-distributed_stats.csv`
+- Comparison vs prior clean distributed reference (`lt-dist-nextphase-async-off-u50-w3-20260212-212939`):
+  - Prior: `p50 26`, `p95 71`, `p99 110`, `avg 31.21`, `rps 1093.03`
+  - New: `p50 26`, `p95 69`, `p99 110`, `avg 30.89`, `rps 1147.43`
+  - Verdict: neutral-to-slight improvement in distributed apples-to-apples conditions; SLO still not met.
+
 ### Distributed load matrix (master + 2 workers, AUTH-only)
 - Repo:
   - `C:/Users/kanna/github/card-fraud-e2e-load-testing`
