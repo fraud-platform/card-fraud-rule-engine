@@ -1,4 +1,9 @@
-﻿# AGENTS.md
+# AGENTS.md
+
+> Archived monolith notice:
+> - Do not start new implementation work in this repository.
+> - Active repos: card-fraud-rule-engine-auth and card-fraud-rule-engine-monitoring.
+> - Keep this repo read-only except archival pointers.
 
 This is the canonical instruction file for all coding agents working in `card-fraud-rule-engine`.
 

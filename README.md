@@ -1,4 +1,11 @@
-﻿# Card Fraud Rule Engine
+# Card Fraud Rule Engine
+
+> Archived monolith: active development moved to split repos.
+>
+> - AUTH: https://github.com/fraud-platform/card-fraud-rule-engine-auth
+> - MONITORING: https://github.com/fraud-platform/card-fraud-rule-engine-monitoring
+>
+> Use the split repositories for all new code, docs, performance testing, and releases.
 
 Stateless Quarkus runtime for card fraud decisioning.
 
